@@ -62,7 +62,7 @@ echo "SCSI ID: $scsi_id"
 
 # Use dmesg to retrieve the device name from the SCSI ID
 # Search for the line containing "sd $scsi_id" and extract the device name (e.g., sda)
-device_name=$(dmesg | grep "sd $scsi_id" | grep -oP "sd $scsi_id: \[([^\]]+)\]" | head -n 1 | sed 's/.*\[//;s/\]//')
+device_name=$(dmesg | grep "sd $scsi_id" | grep -oP "sd $scsi_id: \[([^\]]+)\]" | head -n 1 | sed 's/.*\[//;s/\]//' | sed 's/^[[:space:]]*|-//g' | sed 's/^[[:space:]]*`-//g')
 
 # Check if the device name was found
 if [ -z "$device_name" ]; then
@@ -121,4 +121,42 @@ if [[ "$filesystem" == "ext4" || "$filesystem" == "f2fs" || "$filesystem" == "bt
     echo "Running TRIM on partition /dev/$largest_partition..."
     sudo fstrim /dev/$largest_partition
     if [ $? -eq 0 ]; then
+      echo "TRIM a été activé avec succès sur /dev/$largest_partition."
+    else
+      echo "Échec de l'exécution de TRIM sur /dev/$largest_partition."
+    fi
+  else
+    echo "Le périphérique ne prend pas en charge TRIM."
+  fi
+else
+  echo "Le système de fichiers $filesystem n'est pas compatible avec TRIM."
+  echo "Les systèmes de fichiers compatibles avec TRIM sont : ext4, f2fs, btrfs."
+fi
+
+# Créer le point de montage s'il n'existe pas
+if [ ! -d "$mount_point" ]; then
+  echo "Création du point de montage : $mount_point"
+  sudo mkdir -p "$mount_point"
+fi
+
+# Vérifier si le périphérique est déjà monté
+if mount | grep -q "/dev/$largest_partition"; then
+    echo "Le disque /dev/$largest_partition est déjà monté sur $mount_point."
+else
+    echo "Le disque /dev/$largest_partition n'est pas monté. Montage en cours..."
+    sudo mount /dev/$largest_partition $mount_point
+    if [ $? -eq 0 ]; then
+        echo "Le disque /dev/$largest_partition a été monté avec succès sur $mount_point."
+    else
+        echo "Erreur lors du montage du disque/dev/$largest_partition."
+    fi
+fi
+
+# Si hdparm a été installé, mais n'était pas présent avant, le retirer
+if [ "$install_hdparm" = true ]; then
+  echo "Désinstallation de hdparm..."
+  sudo apt-get remove --purge -y hdparm
+  sudo apt-get autoremove -y
+  echo "hdparm a été désinstallé."
+fi
  
