@@ -1,69 +1,80 @@
 #!/bin/bash
 #############################################
 #                                           #
-#              USB Drive Toolbox            #
-#               v1.01                       #
+#             USB Drive Toolbox             #
+#               v1.02                       #
 #############################################
 # Script name
 SCRIPT_NAME="USB Drive Toolbox"
-SCRIPT_VERSION="v1.01"  # Define the version of the script
+SCRIPT_VERSION="v1.02"  # Version
 
 # Default parameters
-usb_name="NVME Adapter"  # Default USB device name
-mount_point="/mnt/usb"   # Default mount point
-install_systemd=false
-remove_systemd=false
-selected_partition=""  # Default is empty, will be set by -s/--sd option
+label=""                # Default label of the USB device
+partuuid=""             # Default PARTUUID of the partition
+mount_point="/mnt/usb"  # Default mount point
+install_hdparm=false	# Trigger to uninstall hdparm if installed by script
+selected_partition=""
+install_systemd=false	# Default to not install into systemd
+add_fstab=false         # Default to not adding to fstab
 
 # Function to display help information
 display_help() {
     echo "Usage: $0 [options]"
     echo
-    echo "This script enables TRIM on a USB SSD drive."
+    echo "This script enables TRIM on a USB SSD drive, mounts a USB SSD drive, and enables a systemd service for auto-mounting."
     echo
     echo "Options:"
     echo "  -i, --install          Install as a systemd service"
-    echo "  -r, --remove           Remove the systemd service"
+    echo "  -u, --uninstall        Remove the systemd service ONLY and exit"
     echo "  -m, --mount <path>     Specify the mount point (default: /mnt/usb)"
-    echo "  -u, --usb <device>     Specify the USB device name (default: NVME Adapter)"
-    echo "  -s, --sd <partition>   Specify the selected partition directly"
+    echo "  -p, --partuuid <partuuid>  Specify the PARTUUID of the partition"
+    echo "  -s, --sd <partition>   Specify the partition directly (avoid auto-detection)"
+    echo "  -f, --fstab            Add the partition to /etc/fstab for automatic mounting"
     echo "  -v, --version          Display the script version"
     echo "  -h, --help             Display this help message"
+    echo
+    echo "Priority of parameters:"
+    echo "  1. --partuuid <partuuid>: First, the script will attempt to use PARTUUID to identify the partition."
+    echo "  2. --sd <partition>: If no PARTUUID is provided, the script will then use the partition identifier (e.g., /dev/sda1)."
+    echo "  3. --label <label>: If neither PARTUUID nor partition identifier is provided, the script will search for a partition with the specified label."
+    echo "  4. If none of the above is provided, the script will search for the last connected USB disk."
     echo
     echo "Example:"
     echo "  $0 -i                  Install the script as a systemd service"
     echo "  $0 --help              Display this help message"
     echo "  $0 -v                  Display the script version"
     echo "  $0 -m /path/to/mount   Specify the mount point"
-    echo "  $0 -u 'USB Device'     Specify the USB device name"
-    echo "  $0 -r                  Remove the systemd service"
-    echo "  $0 -s /dev/sda1        Specify the selected partition directly"
+    echo "  $0 -p <PARTUUID>       Specify the PARTUUID of the partition"
+    echo "  $0 -s <partition>      Specify the selected partition directly"
+    echo "  $0 -u                  Remove the systemd service"
+    echo "  $0 -f                  Add the partition to /etc/fstab"
+}
+
+# Function to uninstall hdparm
+uninstall_hdparm() {
+    echo "Uninstalling hdparm..."
+    sudo apt-get remove --purge -y hdparm
+    echo "hdparm has been uninstalled."
 }
 
 # Function to install the systemd service
 install_systemd_service() {
     echo "Installing systemd service..."
-
-    # Install the script itself in /usr/local/bin/
-    script_path="/usr/local/bin/usb-drive-toolbox"
-    sudo cp "$0" "$script_path"
-    sudo chmod +x "$script_path"
-    echo "Script installed to $script_path"
-
     service_file="/etc/systemd/system/usb-drive-toolbox.service"
 
-    # Create the systemd service file with the selected_partition value (if provided)
+    # Create the systemd service file
     sudo bash -c "cat > $service_file <<EOF
 [Unit]
-Description=USB Drive Toolbox - Mount and Enable TRIM for USB SSD
+Description=USB Drive Toolbox
 
 [Service]
-ExecStart=$script_path
+ExecStart=$0
 Restart=always
 User=root
-Environment=USB_NAME=${usb_name}
-Environment=MOUNT_POINT=${mount_point}
-Environment=SELECTED_PARTITION=${selected_partition}
+Environment=LABEL=$label
+Environment=PARTUUID=$partuuid
+Environment=MOUNT_POINT=$mount_point
+Environment=SELECTED_PARTITION=$selected_partition
 
 [Install]
 WantedBy=multi-user.target
@@ -75,28 +86,44 @@ EOF"
     sudo systemctl start usb-drive-toolbox.service
 
     echo "Systemd service installed and enabled."
+
+    # Install the script itself in /usr/local/bin/
+    script_path="/usr/local/bin/usb-drive-toolbox"
+    sudo cp "$0" "$script_path"
+    sudo chmod +x "$script_path"
+    echo "Script installed to $script_path"
 }
 
 # Function to remove the systemd service
 remove_systemd_service() {
-    echo "Removing systemd service..."
-    sudo systemctl stop usb-drive-toolbox.service
-    sudo systemctl disable usb-drive-toolbox.service
-    sudo rm -f /etc/systemd/system/usb-drive-toolbox.service
-    sudo systemctl daemon-reload
-    echo "Systemd service removed."
+    service_file="/etc/systemd/system/usb-drive-toolbox.service"
+
+    # Check if the systemd service file exists
+    if [ -f "$service_file" ]; then
+        echo "Removing systemd service..."
+        sudo systemctl stop usb-drive-toolbox.service
+        sudo systemctl disable usb-drive-toolbox.service
+        sudo rm -f "$service_file"
+        sudo systemctl daemon-reload
+        echo "Systemd service removed."
+    else
+        echo "Systemd service file does not exist. Nothing to remove."
+    fi
 }
 
-# Use systemd passed environment variables if available
-if [ -n "$USB_NAME" ]; then
-  usb_name="$USB_NAME"
-fi
-if [ -n "$MOUNT_POINT" ]; then
-  mount_point="$MOUNT_POINT"
-fi
-if [ -n "$SELECTED_PARTITION" ]; then
-  selected_partition="$SELECTED_PARTITION"
-fi
+# Function to add the partition to /etc/fstab
+add_to_fstab() {
+    echo "Adding the partition to /etc/fstab for automatic mounting..."
+    
+    # Check if the entry is already present in fstab
+    if grep -q "$partuuid" /etc/fstab; then
+        echo "The partition is already listed in /etc/fstab."
+    else
+        # Add the fstab entry using PARTUUID
+        echo "PARTUUID=$partuuid $mount_point $filesystem defaults 0 2" | sudo tee -a /etc/fstab
+        echo "The partition has been added to /etc/fstab."
+    fi
+}
 
 # Parse command-line arguments
 while [[ $# -gt 0 ]]; do
@@ -105,9 +132,9 @@ while [[ $# -gt 0 ]]; do
             install_systemd=true
             shift # Remove the argument from the list
             ;;
-        -r|--remove)
-            remove_systemd=true
-            shift # Remove the argument from the list
+        -u|--uninstall)
+            remove_systemd_service
+            exit 0
             ;;
         -v|--version)
             echo "Script version: $SCRIPT_VERSION"
@@ -117,13 +144,17 @@ while [[ $# -gt 0 ]]; do
             mount_point="$2"
             shift 2 # Remove the argument and value from the list
             ;;
-        -u|--usb)
-            usb_name="$2"
+        -p|--partuuid)
+            partuuid="$2"
             shift 2 # Remove the argument and value from the list
             ;;
         -s|--sd)
             selected_partition="$2"
             shift 2 # Remove the argument and value from the list
+            ;;
+        -f|--fstab)
+            add_fstab=true
+            shift # Remove the argument from the list
             ;;
         -h|--help)
             display_help
@@ -137,93 +168,87 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# If the -i option is used, install the systemd service
-if [ "$install_systemd" = true ]; then
-    install_systemd_service
-    exit 0
+# Check if -f and -i are used together
+if [ "$install_systemd" = true ] && [ "$add_fstab" = true ]; then
+    echo "Error: You cannot use both -i (install systemd service) and -f (add to fstab) at the same time."
+    exit 1
 fi
 
-# If the -r option is used, remove the systemd service
-if [ "$remove_systemd" = true ]; then
-    remove_systemd_service
-    exit 0
+# Use systemd passed environment variables if available
+if [ -n "$LABEL" ]; then
+    label="$LABEL"
+fi
+if [ -n "$PARTUUID" ]; then
+    partuuid="$PARTUUID"
+fi
+if [ -n "$SELECTED_PARTITION" ]; then
+    selected_partition="$SELECTED_PARTITION"
 fi
 
-# Use the selected_partition if it was provided
+# Find the partition using partuuid, label, or sda
+echo "Finding partition with provided identifiers..."
+
+# Search by partuuid first
+if [ -n "$partuuid" ]; then
+    selected_partition=$(blkid | grep "PARTUUID=\"$partuuid\"" | awk '{print $1}' | sed 's/://')
+    echo "The selected partition with PARTUUID is: $selected_partition"
+    # If partuuid is found, find label
+    if [ -n "$selected_partition" ]; then
+        label=$(blkid $selected_partition | grep "LABEL=" | cut -d '=' -f 2)
+    fi
+fi
+
+# If no partuuid, try label
+if [ -z "$selected_partition" ] && [ -n "$label" ]; then
+    selected_partition=$(blkid | grep "LABEL=\"$label\"" | awk '{print $1}' | sed 's/://')
+    echo "The selected partition with LABEL is: $selected_partition"
+    # If label is found, find partuuid
+    if [ -n "$selected_partition" ]; then
+        partuuid=$(blkid $selected_partition | grep "PARTUUID=" | cut -d '=' -f 2)
+    fi
+fi
+
+# If no partuuid or label, try sda
 if [ -n "$selected_partition" ]; then
-    echo "Using the provided partition: $selected_partition"
-else
-    # Retrieve the USB device with lsusb and grep
-    usb_device=$(lsusb | grep "$usb_name")
-
-    # Retrieve bus and device numbers from the lsusb output
-    bus_number=$(echo $usb_device | awk '{print $2}' | sed 's/^0*//')
-    device_number=$(echo $usb_device | awk '{print $4}' | sed 's/^0*//;s/://')
-
-    # Display bus and device numbers
-    echo "Bus Number: $bus_number"
-    echo "Device Number: $device_number"
-
-    # Use dmesg to find both Product ID and Manufacturer
-    product_info=$(dmesg | grep -i "usb $bus_number-$device_number" | grep -oP 'Product:\s+\K([^\s]+)')
-    manufacturer_info=$(dmesg | grep -i "usb $bus_number-$device_number" | grep -oP 'Manufacturer:\s+\K([^\s]+)')
-
-    # Check if product and manufacturer info were retrieved successfully
-    if [ -z "$product_info" ] || [ -z "$manufacturer_info" ]; then
-      echo "Unable to find product ID or manufacturer in dmesg logs."
-      exit 1
+    echo "The selected partition with SDA is: $selected_partition"
+    
+    # If no partuuid or label, attempt to find label and partuuid
+    if [ -n "$selected_partition" ]; then
+        label=$(blkid $selected_partition | grep "LABEL=" | cut -d '=' -f 2)
+        partuuid=$(blkid $selected_partition | grep "PARTUUID=" | cut -d '=' -f 2)
     fi
-
-    # Display product ID and manufacturer
-    echo "Product ID found: $product_info"
-    echo "Manufacturer found: $manufacturer_info"
-
-    # Use dmesg to find the SCSI line associated with the device
-    scsi_id=$(dmesg | grep -i "Direct-Access" | grep -i "$manufacturer_info" | grep -i "$product_info" | grep -oP 'scsi \K(\d+:\d+:\d+:\d+)' | head -n 1)
-
-    if [ -z "$scsi_id" ]; then
-      echo "Unable to find SCSI ID for this USB device."
-      exit 1
-    fi
-
-    # Display the SCSI ID found
-    echo "SCSI ID: $scsi_id"
-
-    # Use dmesg to retrieve the device name from the SCSI ID
-    device_name=$(dmesg | grep "sd $scsi_id" | grep -oP "sd $scsi_id: \[([^\]]+)\]" | head -n 1 | sed 's/.*\[//;s/\]//' | sed 's/^[[:space:]]*|-//g' | sed 's/^[[:space:]]*`-//g')
-
-    # Check if the device name was found
-    if [ -z "$device_name" ]; then
-      echo "Unable to find device name from the SCSI ID."
-      exit 1
-    fi
-
-    # Display the device name found
-    echo "Storage device name: /dev/$device_name"
-
-    # List all partitions of this device and display
-    echo "List of partitions of /dev/$device_name:"
-    lsblk -o NAME,SIZE /dev/$device_name
-
-    # Extract partitions (ignore "disk" type and the header) and sort by size
-    partitions=$(lsblk -o NAME,SIZE,TYPE $device_name | grep -v "disk" | grep -v "NAME" | sort -k2 -h)
-
-    # Clean up tree characters (e.g.,├─, └─ or |-, `- in systemctl) and retrieve only the partition name
-    clean_partitions=$(echo "$partitions" | sed 's/^[[:space:]]*└─//g' | sed 's/^[[:space:]]*├─//g' | sed 's/^[[:space:]]*`-//g' | sed 's/^[[:space:]]*|-//g')
-
-
-    # Extract the largest partition (the last one after sorting)
-    selected_partition=$(echo "$clean_partitions" | tail -n 1 | awk '{print $1}')
-
-    # Check if a partition was found
-    if [ -z "$selected_partition" ]; then
-      echo "Unable to find a partition on /dev/$device_name."
-      exit 1
-    fi
-
-    # Display the selected partition
-    echo "The selected partition is: $selected_partition"
 fi
+
+# If still no partition found, take the last USB disk found in dmesg
+if [ -z "$selected_partition" ]; then
+    echo "No partition found for the provided identifiers. Taking the last USB disk found in dmesg..."
+
+    # Get the last USB disk from dmesg using the desired string and remove square brackets
+    device_name=$(dmesg | grep -oP 'sd \S+: \[\S+\] Attached SCSI disk' | tail -n 1 | awk '{print "/dev/" $3}' | sed 's/\[//g' | sed 's/\]//g')
+
+    # If the disk is partitioned, find the largest partition
+    if [ -n "$device_name" ]; then
+        echo "List of partitions of $device_name:"
+        lsblk -o NAME,SIZE,TYPE $device_name
+
+        # Extract partitions (ignore "disk" type and the header) and sort by size
+        partitions=$(lsblk -o NAME,SIZE,TYPE $device_name | grep -v "disk" | grep -v "NAME" | sort -k2 -h)
+
+        # Clean up tree characters (e.g.,├─, └─ or |-, `- in systemctl) and retrieve only the partition name
+        clean_partitions=$(echo "$partitions" | sed 's/^[[:space:]]*└─//g' | sed 's/^[[:space:]]*├─//g' | sed 's/^[[:space:]]*`-//g' | sed 's/^[[:space:]]*|-//g')
+
+        # Select the largest partition (the last one after sorting) and prepend /dev/
+        selected_partition="/dev/$(echo "$clean_partitions" | tail -n 1 | awk '{print $1}')"
+    fi
+fi
+
+if [ -z "$selected_partition" ]; then
+    echo "No partition found."
+    exit 1
+fi
+
+# Display the selected partition
+echo "The selected partition is: $selected_partition"
 
 # Retrieve and display the filesystem of the selected partition
 filesystem=$(sudo blkid $selected_partition | awk -F ' ' '{for(i=1;i<=NF;i++) if($i ~ /TYPE=/) print $i}' | cut -d '=' -f 2)
@@ -238,36 +263,35 @@ if [[ "$filesystem" == "ext4" || "$filesystem" == "f2fs" || "$filesystem" == "bt
   # Check if the device is an SSD
   rota=$(lsblk -d -o ROTA $selected_partition | tail -n 1)
   if [ "$rota" -eq 0 ]; then
-    echo "The disk $device_name is an SSD."
-
+    echo "The disk is an SSD."
+    
     # Install hdparm before checking TRIM support if necessary
     if ! command -v hdparm &> /dev/null; then
       echo "hdparm is not installed. Installing..."
       sudo apt-get update -y
       sudo apt-get install -y hdparm
+      install_hdparm=true  # Set install_hdparm to true when installing hdparm
     fi
 
     # Check if the device supports TRIM
     if sudo hdparm -I $selected_partition | grep -q "TRIM supported"; then
-      echo "TRIM is supported for this disk."
-      
-      # Enable TRIM in real-time using fstrim
-      echo "Running TRIM on partition $selected_partition..."
-      sudo fstrim $selected_partition
-      if [ $? -eq 0 ]; then
-        echo "TRIM was successfully enabled on $selected_partition."
-      else
-        echo "Failed to run TRIM on $selected_partition."
-      fi
+      echo "The device supports TRIM."
     else
       echo "The device does not support TRIM."
     fi
+
+    # Uninstall hdparm after checking
+    if [ "$install_hdparm" = true ]; then
+        uninstall_hdparm
+    fi
   else
-    echo "The disk $device_name is an HDD. TRIM is not applicable for HDDs."
+    echo "The disk is not an SSD."
   fi
-else
-  echo "The filesystem $filesystem is not compatible with TRIM."
-  echo "The supported filesystems for TRIM are: ext4, f2fs, btrfs."
+fi
+
+# Add to fstab if requested
+if [ "$add_fstab" = true ]; then
+    add_to_fstab
 fi
 
 # Create the mount point if it doesn't exist
@@ -276,7 +300,7 @@ if [ ! -d "$mount_point" ]; then
   echo "Created mount point: $mount_point"
 fi
 
-# Check if device allready mounted
+# Check if the device is already mounted
 if mount | grep -q "$selected_partition"; then
     echo "The disk $selected_partition is already mounted at $mount_point."
 else
