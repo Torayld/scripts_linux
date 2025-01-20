@@ -7,18 +7,19 @@
 # Description:
 # This script allows you to mount a USB SSD drive, enable TRIM support,
 # umount the partition, manage fstab entries, and install a systemd service
-# Version: 1.0.5
+# Version: 1.0.6
 # Author: Torayld
 # -------------------------------------------------------------------
-SCRIPT_VERSION="v1.05"  # Version
+SCRIPT_VERSION="v1.06"  # Version
 
 # Default parameters
 label=""                # Default label of the USB device
 partuuid=""             # Default PARTUUID of the partition
 mount_point="/mnt/usb"  # Default mount point
-install_hdparm=false	  # Trigger to uninstall hdparm if installed by script
+install_hdparm=false    # Trigger to uninstall hdparm if installed by script
 selected_partition=""
-install_systemd=false	  # Default to not install into systemd
+install_systemd=false   # Default to not install into systemd
+uninstall_systemd=false # Default to not uninstall from systemd
 add_fstab=false         # Default to not adding to fstab
 remove_fstab=false      # Default to not removing from fstab
 
@@ -29,7 +30,7 @@ display_help() {
     echo "This script enables TRIM on a USB SSD drive, mounts a USB SSD drive, and enables a systemd service for auto-mounting."
     echo
     echo "Options:"
-    echo "  -s, --systemd          Install as a systemd service"
+    echo "  -is, --install-systemd Install as a systemd service"
     echo "  -rs, --remove-systemd  Remove the systemd service ONLY and exit"
     echo "  -m, --mount <path>     Specify the mount point (default: /mnt/usb)"
     echo "  -u, --umount <path>    Umount the partition and remove the mount point"
@@ -81,93 +82,54 @@ install_systemd_service() {
     check_fstab
     if [ "$fstap_allready" = true ]; then
         echo "Error: The partition is already in /etc/fstab."
-        exit 62
-    fi
-    echo "Installing systemd service..."
-    # Install the script itself in /usr/local/bin/
-    script_path="/usr/local/bin/usb-drive-toolbox"
-    if sudo cp "$0" "$script_path" && sudo chmod +x "$script_path"; then
-        echo "Script installed to $script_path"
-    else
-        echo "Error: Unable to install the script."
         exit 60
     fi
-    
-    service_file="/etc/systemd/system/usb-drive-toolbox.service"
 
-    # Create the systemd service file
-    sudo bash -c "cat > $service_file <<EOF
-[Unit]
-Description=USB Drive Toolbox
-
-[Service]
-ExecStart=$script_path
-Restart=always
-User=root
-Environment=LABEL=$label
-Environment=PARTUUID=$partuuid
-Environment=MOUNT_POINT=$mount_point
-Environment=SELECTED_PARTITION=$selected_partition
-
-[Install]
-WantedBy=multi-user.target
-EOF"
-    if [ $? -ne 0 ]; then
-      echo "Error: Unable to create /etc/systemd/system/usb-drive-toolbox.service"
-      # Remove the script if the service file creation fails
-      rm -f "$script_path"
-      exit 61
+    # Call the child script
+    if [ ! -f "./systemd.sh" ]; then
+        echo "systemd.sh not found to install service."
+        exit 61
     fi
-    # Reload systemd units and enable the service
-    sudo systemctl daemon-reload
-    sudo systemctl enable usb-drive-toolbox.service
-    sudo systemctl start usb-drive-toolbox.service
 
-    echo "Systemd service installed and enabled."
+    echo "Installing systemd service..."
+    $return=$(./systemd.sh -exe $0 -cs -csf -n usb_mount -env 'PARTUUID="'$partuuid'" MOUNT_POINT="'$mount_point'"' \
+        -d 'Mounting USB Drive for Apache/Mariadb before start' -b mariadb.service)
+
+    # Check the exit status of the child script
+    if [ $return -eq 0 ]; then
+        echo "Systemd service installed and enabled."
+    else
+        echo "systemd.sh encountered an error : "$return
+        exit 62
+    fi
 }
 
 # Function to remove the systemd service
 remove_systemd_service() {
-    service_file="/etc/systemd/system/usb-drive-toolbox.service"
 
-    # Check if the systemd service file exists
-    if [ -f "$service_file" ]; then
-        echo "Removing systemd service..."
-
-        # Extract the script path from the ExecStart directive in the service file
-        script_path=$(grep -oP '(?<=ExecStart=)[^\s]+' "$service_file")
-
-        if [ -z "$script_path" ]; then
-            echo "Error: Unable to extract the script path from the systemd service file."
-            exit 70
-        fi
-
-        sudo systemctl stop usb-drive-toolbox.service
-        sudo systemctl disable usb-drive-toolbox.service
-        sudo rm -f "$service_file"
-        if [ $? -ne 0 ]; then
-          echo "Error: Unable to remove the systemd service file."
-          exit 71
-        fi
-        sudo systemctl daemon-reload
-
-        # Check if the script exists and remove it
-        if [ -f "$script_path" ]; then
-            echo "Removing script file at $script_path..."
-            sudo rm -f "$script_path"
-            if [ $? -ne 0 ]; then
-              echo "Error: Unable to remove the script file."
-              exit 72
-            fi
-            echo "Script file removed."
-        else
-            echo "Script file does not exist at $script_path. Nothing to remove."
-            exit 73
-        fi
-        
-        echo "Systemd service removed."
+    # Search for the MOUNT_POINT value in /etc/systemd/system/usb_mountX.service files
+    result=$(grep -rl "MOUNT_POINT=\"$mount_point\"" /etc/systemd/system/usb_mount*.service)
+    if [ -n "$result" ]; then
+        echo "Found MOUNT_POINT=$mount_point in the following service file(s):"
+        echo "$result"
     else
-        echo "Systemd service file does not exist. Nothing to remove."
+        echo "No service files found with MOUNT_POINT=$mount_point."
+        exit 60
+    fi
+
+    if [ ! -f "./systemd.sh" ]; then
+        echo "systemd.sh not found to install service."
+        exit 61
+    fi
+
+    ./systemd.sh -exe $0 -rs usb_mount1.service
+
+    # Check the exit status of the child script
+    if [ $? -eq 0 ]; then
+        echo "Systemd service installed and enabled."
+    else
+        echo "systemd.sh encountered an error."
+        exit 62
     fi
 }
 
@@ -192,6 +154,12 @@ add_to_fstab() {
 
 # Function to remove the partition from /etc/fstab
 remove_from_fstab() {
+    # Check if $partuuid is empty
+    if [ -z "$partuuid" ]; then
+        echo "Error: PARTUUID is empty. Cannot remove from /etc/fstab."
+        exit 6
+    fi
+    
     echo "Removing the partition from /etc/fstab for automatic mounting..."
 
     # Check if the entry exists in fstab
@@ -204,6 +172,37 @@ remove_from_fstab() {
         echo "The partition has been removed from /etc/fstab."
     else
         echo "No entry found in /etc/fstab for this partition."
+    fi
+}
+
+# Function to remove the systemd service
+mount_partition_func() {
+    # Create the mount point if it doesn't exist
+    if [ ! -d "$mount_point" ]; then
+        sudo mkdir -p "$mount_point"
+        echo "Created mount point: $mount_point"
+    fi
+
+    # Check if the device is already mounted
+    if mount | grep -q "$selected_partition"; then
+        # Check if the actual mount point matches
+        partition_name=$(basename "$selected_partition")
+        actual_mount_point=$(lsblk -o NAME,MOUNTPOINT | grep "$partition_name" | awk '{print $2}')
+        echo "The partition $selected_partition is already mounted on $actual_mount_point."
+
+        if [ "$actual_mount_point" != "$mount_point" ]; then
+            echo "but not on the expected mount point ($mount_point)."
+            exit 30
+        fi
+    else
+        echo "The disk $selected_partition is not mounted. Mounting now..."
+        sudo mount $selected_partition $mount_point
+        if [ $? -eq 0 ]; then
+            echo "The disk $selected_partition was successfully mounted at $mount_point."
+        else
+            echo "Error while mounting $selected_partition."
+            exit 31
+        fi
     fi
 }
 
@@ -246,6 +245,7 @@ umount_partition_func() {
             fi
         else
             echo "Error while unmounting $mount_point."
+            echo $(lsof | grep $mount_point)
             exit 42
         fi
     else
@@ -291,13 +291,13 @@ find_usb_drive() {
 # Parse command-line arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
-        -s|--systemd)
+        -is|--install-systemd)
             install_systemd=true
             shift # Remove the argument from the list
             ;;
         -rs|--remove-systemd)
-            remove_systemd_service
-            exit 0
+            uninstall_systemd=true
+            shift
             ;;
         -v|--version)
             echo "Script version: $SCRIPT_VERSION"
@@ -357,12 +357,6 @@ if [ "$uninstall_systemd" = true ]; then
     exit 0
 fi
 
-# If the -rf option is used, remove the entry from fstab
-if [ "$remove_fstab" = true ]; then
-    remove_from_fstab
-    exit 0
-fi
-
 # Check if -f and -i are used together
 if [ "$install_systemd" = true ] && [ "$add_fstab" = true ]; then
     echo "Error: You cannot use both -i (install systemd service) and -f (add to fstab) at the same time."
@@ -414,13 +408,15 @@ fi
 
 # If no partuuid or label, try sda
 if [ -n "$selected_partition" ]; then
-    echo "The selected partition with SDA is: $selected_partition"
+    echo "The givent partition with param SD is: $selected_partition"
     
-    # If no partuuid or label, attempt to find label and partuuid
-    if [ -n "$selected_partition" ]; then
-        get_label_from_partition
-        get_partuuid_from_partition
+    # Check if the partition starts with "/dev/"
+    if [[ ! "$selected_partition" =~ ^/dev/ ]]; then
+        # If not, prepend "/dev/" to the partition name
+        selected_partition="/dev/$selected_partition"
     fi
+    get_label_from_partition
+    get_partuuid_from_partition
 fi
 
 # If still no partition found, take the last USB disk found in dmesg
@@ -437,6 +433,14 @@ fi
 
 # Display the selected partition
 echo "The selected partition is: $selected_partition"
+echo "The Label is: $label"
+echo "The PARTUUID is: $partuuid"
+
+# If the -rf option is used, remove the entry from fstab
+if [ "$remove_fstab" = true ]; then
+    remove_from_fstab
+    exit 0
+fi
 
 # If the -i option is used, install the systemd service
 if [ "$install_systemd" = true ]; then
@@ -497,31 +501,7 @@ if [ "$add_fstab" = true ]; then
     add_to_fstab
 fi
 
-# Create the mount point if it doesn't exist
-if [ ! -d "$mount_point" ]; then
-  sudo mkdir -p "$mount_point"
-  echo "Created mount point: $mount_point"
-fi
-
-# Check if the device is already mounted
-if mount | grep -q "$selected_partition"; then
-  # Check if the actual mount point matches
-  partition_name=$(basename "$selected_partition")
-  actual_mount_point=$(lsblk -o NAME,MOUNTPOINT | grep "$partition_name" | awk '{print $2}')
-  echo "The partition $selected_partition is already mounted on $actual_mount_point."
-
-  if [ "$actual_mount_point" != "$mount_point" ]; then
-    echo "but not on the expected mount point ($mount_point)."
-    exit 30
-  fi
-else
-  echo "The disk $selected_partition is not mounted. Mounting now..."
-  sudo mount $selected_partition $mount_point
-  if [ $? -eq 0 ]; then
-      echo "The disk $selected_partition was successfully mounted at $mount_point."
-  else
-      echo "Error while mounting $selected_partition."
-      exit 31
-  fi
+if [ "$install_systemd" = false ]; then
+    mount_partition_func
 fi
 exit 0
