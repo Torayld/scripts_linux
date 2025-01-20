@@ -2,20 +2,21 @@
 #############################################
 #                                           #
 #             USB Drive Toolbox             #
-#               v1.02                       #
+#                 v1.03                     #
 #############################################
 # Script name
 SCRIPT_NAME="USB Drive Toolbox"
-SCRIPT_VERSION="v1.02"  # Version
+SCRIPT_VERSION="v1.03"  # Version
 
 # Default parameters
 label=""                # Default label of the USB device
 partuuid=""             # Default PARTUUID of the partition
 mount_point="/mnt/usb"  # Default mount point
-install_hdparm=false	# Trigger to uninstall hdparm if installed by script
+install_hdparm=false	  # Trigger to uninstall hdparm if installed by script
 selected_partition=""
-install_systemd=false	# Default to not install into systemd
+install_systemd=false	  # Default to not install into systemd
 add_fstab=false         # Default to not adding to fstab
+remove_fstab=false      # Default to not removing from fstab
 
 # Function to display help information
 display_help() {
@@ -24,12 +25,14 @@ display_help() {
     echo "This script enables TRIM on a USB SSD drive, mounts a USB SSD drive, and enables a systemd service for auto-mounting."
     echo
     echo "Options:"
-    echo "  -i, --install          Install as a systemd service"
-    echo "  -u, --uninstall        Remove the systemd service ONLY and exit"
+    echo "  -s, --systemd          Install as a systemd service"
+    echo "  -rs, --remove-systemd  Remove the systemd service ONLY and exit"
     echo "  -m, --mount <path>     Specify the mount point (default: /mnt/usb)"
+    echo "  -u, --umount <path>    Umount the partition and remove the mount point"
     echo "  -p, --partuuid <partuuid>  Specify the PARTUUID of the partition"
     echo "  -s, --sd <partition>   Specify the partition directly (avoid auto-detection)"
     echo "  -f, --fstab            Add the partition to /etc/fstab for automatic mounting"
+    echo "  -rf, --remove-fstab    Remove the partition from /etc/fstab for automatic mounting"
     echo "  -v, --version          Display the script version"
     echo "  -h, --help             Display this help message"
     echo
@@ -48,18 +51,30 @@ display_help() {
     echo "  $0 -s <partition>      Specify the selected partition directly"
     echo "  $0 -u                  Remove the systemd service"
     echo "  $0 -f                  Add the partition to /etc/fstab"
-}
-
-# Function to uninstall hdparm
-uninstall_hdparm() {
-    echo "Uninstalling hdparm..."
-    sudo apt-get remove --purge -y hdparm
-    echo "hdparm has been uninstalled."
+    echo
+    echo "Error Codes:"
+    echo "  1x   - Param error"
+    echo "  2x   - No partition found"
+    echo "  3x   - Error while mounting the partition"
+    echo "  4x   - Error while adding to /etc/fstab"
+    echo "  5x   - Error while removing from /etc/fstab"
+    echo "  6x   - Error while installing systemd service"
+    echo "  7x   - Error while installing/uninstalling hdparm"
+    echo "  8x   - Error while umounting the partition"
 }
 
 # Function to install the systemd service
 install_systemd_service() {
     echo "Installing systemd service..."
+    # Install the script itself in /usr/local/bin/
+    script_path="/usr/local/bin/usb-drive-toolbox"
+    if sudo cp "$0" "$script_path" && sudo chmod +x "$script_path"; then
+        echo "Script installed to $script_path"
+    else
+        echo "Error: Unable to install the script."
+        exit 60
+    fi
+    
     service_file="/etc/systemd/system/usb-drive-toolbox.service"
 
     # Create the systemd service file
@@ -68,7 +83,7 @@ install_systemd_service() {
 Description=USB Drive Toolbox
 
 [Service]
-ExecStart=$0
+ExecStart=$script_path
 Restart=always
 User=root
 Environment=LABEL=$label
@@ -79,19 +94,18 @@ Environment=SELECTED_PARTITION=$selected_partition
 [Install]
 WantedBy=multi-user.target
 EOF"
-
+    if [ $? -ne 0 ]; then
+      echo "Error: Unable to create /etc/systemd/system/usb-drive-toolbox.service"
+      # Remove the script if the service file creation fails
+      rm -f "$script_path"
+      exit 61
+    fi
     # Reload systemd units and enable the service
     sudo systemctl daemon-reload
     sudo systemctl enable usb-drive-toolbox.service
     sudo systemctl start usb-drive-toolbox.service
 
     echo "Systemd service installed and enabled."
-
-    # Install the script itself in /usr/local/bin/
-    script_path="/usr/local/bin/usb-drive-toolbox"
-    sudo cp "$0" "$script_path"
-    sudo chmod +x "$script_path"
-    echo "Script installed to $script_path"
 }
 
 # Function to remove the systemd service
@@ -101,10 +115,38 @@ remove_systemd_service() {
     # Check if the systemd service file exists
     if [ -f "$service_file" ]; then
         echo "Removing systemd service..."
+
+        # Extract the script path from the ExecStart directive in the service file
+        script_path=$(grep -oP '(?<=ExecStart=)[^\s]+' "$service_file")
+
+        if [ -z "$script_path" ]; then
+            echo "Error: Unable to extract the script path from the systemd service file."
+            exit 70
+        fi
+
         sudo systemctl stop usb-drive-toolbox.service
         sudo systemctl disable usb-drive-toolbox.service
         sudo rm -f "$service_file"
+        if [ $? -ne 0 ]; then
+          echo "Error: Unable to remove the systemd service file."
+          exit 71
+        fi
         sudo systemctl daemon-reload
+
+        # Check if the script exists and remove it
+        if [ -f "$script_path" ]; then
+            echo "Removing script file at $script_path..."
+            sudo rm -f "$script_path"
+            if [ $? -ne 0 ]; then
+              echo "Error: Unable to remove the script file."
+              exit 72
+            fi
+            echo "Script file removed."
+        else
+            echo "Script file does not exist at $script_path. Nothing to remove."
+            exit 73
+        fi
+        
         echo "Systemd service removed."
     else
         echo "Systemd service file does not exist. Nothing to remove."
@@ -121,18 +163,86 @@ add_to_fstab() {
     else
         # Add the fstab entry using PARTUUID
         echo "PARTUUID=$partuuid $mount_point $filesystem defaults 0 2" | sudo tee -a /etc/fstab
+        if [ $? -ne 0 ]; then
+            echo "Error: Unable to modify /etc/fstab."
+            exit 4
+        fi
         echo "The partition has been added to /etc/fstab."
+    fi
+}
+
+# Function to remove the partition from /etc/fstab
+remove_from_fstab() {
+    echo "Removing the partition from /etc/fstab for automatic mounting..."
+
+    # Check if the entry exists in fstab
+    if grep -q "$partuuid" /etc/fstab; then
+        sudo sed -i "/$partuuid/d" /etc/fstab
+        if [ $? -ne 0 ]; then
+            echo "Error: Unable to modify /etc/fstab."
+            exit 5
+        fi
+        echo "The partition has been removed from /etc/fstab."
+    else
+        echo "No entry found in /etc/fstab for this partition."
+    fi
+}
+
+# Function to unmount the partition and remove the mount point directory if it's empty
+umount_partition_func() {
+    # Ensure that the argument provided with -u is not empty
+    if [ -z "$umount_target" ]; then
+        echo "Error: You must specify a partition or mount point with the -u option."
+        exit 40
+    fi
+    
+    echo "Unmounting $umount_target..."
+
+    # Check if the argument is a partition (e.g., /dev/sda) or a mount point (e.g., /mnt/usb)
+    if [[ "$umount_target" =~ ^/dev/ ]]; then
+        # If it's a partition, find the corresponding mount point using mount command
+        mount_point=$(mount | grep "$umount_target" | awk '{print $3}')
+
+        if [ -z "$mount_point" ]; then
+            echo "Error: $umount_target is not mounted."
+            exit 41
+        else
+            echo "Partition $umount_target is mounted at $mount_point."
+        fi
+    else
+        # If it's a mount point, use it directly
+        mount_point="$umount_target"
+    fi
+
+    # Now unmount the target (either partition or mount point)
+    if mount | grep -q "$mount_point"; then
+        sudo umount "$mount_point"
+        if [ $? -eq 0 ]; then
+            echo "$mount_point has been successfully unmounted."
+            
+            # If the mount point is empty, remove the directory
+            if [ -d "$mount_point" ] && [ ! "$(ls -A $mount_point)" ]; then
+                sudo rmdir "$mount_point"
+                echo "The mount point directory $mount_point has been removed."
+            fi
+        else
+            echo "Error while unmounting $mount_point."
+            exit 42
+        fi
+    else
+        echo "$mount_point is not mounted."
+        exit 43
     fi
 }
 
 # Parse command-line arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
-        -i|--install)
+        -s|--systemd)
             install_systemd=true
             shift # Remove the argument from the list
             ;;
-        -u|--uninstall)
+        -rs|--remove-systemd)
             remove_systemd_service
             exit 0
             ;;
@@ -142,6 +252,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         -m|--mount)
             mount_point="$2"
+            shift 2 # Remove the argument and value from the list
+            ;;
+        -u|--umount)
+            umount_target="$2"
             shift 2 # Remove the argument and value from the list
             ;;
         -p|--partuuid)
@@ -156,6 +270,10 @@ while [[ $# -gt 0 ]]; do
             add_fstab=true
             shift # Remove the argument from the list
             ;;
+        -rf|--remove-fstab)
+            remove_fstab=true
+            shift # Remove the argument from the list
+            ;;
         -h|--help)
             display_help
             exit 0
@@ -168,10 +286,34 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# If the -u or --umount option is used, unmount the partition
+if [ -n "$umount_target" ]; then
+    umount_partition_func
+    exit 0
+fi
+
+# Check if -f and -i are used together
+if [ "$uninstall_systemd" = true ] && [ "$remove_fstab" = true ]; then
+    echo "Error: You cannot use both -u (uniinstall systemd service) and -rf (remove fstab) at the same time."
+    exit 12
+fi
+
+# If the -rs option is used, remove the systemd service
+if [ "$uninstall_systemd" = true ]; then
+    remove_systemd_service
+    exit 0
+fi
+
+# If the -rf option is used, remove the entry from fstab
+if [ "$remove_fstab" = true ]; then
+    remove_from_fstab
+    exit 0
+fi
+
 # Check if -f and -i are used together
 if [ "$install_systemd" = true ] && [ "$add_fstab" = true ]; then
     echo "Error: You cannot use both -i (install systemd service) and -f (add to fstab) at the same time."
-    exit 1
+    exit 13
 fi
 
 # Use systemd passed environment variables if available
@@ -244,11 +386,16 @@ fi
 
 if [ -z "$selected_partition" ]; then
     echo "No partition found."
-    exit 1
+    exit 2
 fi
 
 # Display the selected partition
 echo "The selected partition is: $selected_partition"
+
+# If the -i option is used, install the systemd service
+if [ "$install_systemd" = true ]; then
+    install_systemd_service
+fi
 
 # Retrieve and display the filesystem of the selected partition
 filesystem=$(sudo blkid $selected_partition | awk -F ' ' '{for(i=1;i<=NF;i++) if($i ~ /TYPE=/) print $i}' | cut -d '=' -f 2)
@@ -270,6 +417,10 @@ if [[ "$filesystem" == "ext4" || "$filesystem" == "f2fs" || "$filesystem" == "bt
       echo "hdparm is not installed. Installing..."
       sudo apt-get update -y
       sudo apt-get install -y hdparm
+      if [ $? -ne 0 ]; then
+        echo "Error: Unable to install hdparm."
+        exit 70
+      fi
       install_hdparm=true  # Set install_hdparm to true when installing hdparm
     fi
 
@@ -282,7 +433,13 @@ if [[ "$filesystem" == "ext4" || "$filesystem" == "f2fs" || "$filesystem" == "bt
 
     # Uninstall hdparm after checking
     if [ "$install_hdparm" = true ]; then
-        uninstall_hdparm
+        echo "Uninstalling hdparm..."
+        sudo apt-get remove --purge -y hdparm
+        if [ $? -ne 0 ]; then
+          echo "Error: Unable to uninstall hdparm."
+          exit 71
+        fi
+        echo "hdparm has been uninstalled."
     fi
   else
     echo "The disk is not an SSD."
@@ -302,13 +459,23 @@ fi
 
 # Check if the device is already mounted
 if mount | grep -q "$selected_partition"; then
-    echo "The disk $selected_partition is already mounted at $mount_point."
+  # Check if the actual mount point matches
+  partition_name=$(basename "$selected_partition")
+  actual_mount_point=$(lsblk -o NAME,MOUNTPOINT | grep "$partition_name" | awk '{print $2}')
+  echo "The partition $selected_partition is already mounted on $actual_mount_point."
+
+  if [ "$actual_mount_point" != "$mount_point" ]; then
+    echo "but not on the expected mount point ($mount_point)."
+    exit 30
+  fi
 else
-    echo "The disk $selected_partition is not mounted. Mounting now..."
-    sudo mount $selected_partition $mount_point
-    if [ $? -eq 0 ]; then
-        echo "The disk $selected_partition was successfully mounted at $mount_point."
-    else
-        echo "Error while mounting $selected_partition."
-    fi
+  echo "The disk $selected_partition is not mounted. Mounting now..."
+  sudo mount $selected_partition $mount_point
+  if [ $? -eq 0 ]; then
+      echo "The disk $selected_partition was successfully mounted at $mount_point."
+  else
+      echo "Error while mounting $selected_partition."
+      exit 31
+  fi
 fi
+exit 0
