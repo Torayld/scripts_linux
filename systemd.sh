@@ -6,47 +6,12 @@
 # Script to generate, register, and remove systemd service files
 # Description: This script allows you to generate a systemd service file
 # with all possible parameters and options, register it, and remove it.
-# Version: 1.0.0
+# Version: 1.0.1
 # Author: Torayld
 # -------------------------------------------------------------------
 
-display_help() {
-    echo "Usage: $0 [OPTIONS]"
-    echo ""
-    echo "Options:"
-    echo "  -d, --description <string>     Service description."
-    echo "  -doc, --documentation <string> Documentation URL."
-    echo "  -a, --after <string>           List of services to start after this one."
-    echo "  -b, --before <string>          List of services to start before this one."
-    echo "  -w, --wants <string>           List of services this one wants."
-    echo "  -wb, --wantedby <string>       List of services that want this one."
-    echo "  -r, --requires <string>        List of services this one requires."
-    echo "  -cf, --conflicts <string>      List of services that conflict with this one."
-    echo "  -t, --type <string>            Service type (simple, forking, oneshot, etc.)."
-    echo "  -exe, --execstart <string>     Command to start the service."
-    echo "  -u, --user <string>            User to run the service as."
-    echo "  -g, --group <string>           Group to run the service as."
-    echo "  -cs, --copy-script <path>      Specifies the path of the script to copy (default $script_path_default)."
-    echo "  -csf, --copy-script-force      Force overwrite the script file without confirmation."
-    echo "  -rm, --remove <service>        Remove the specified systemd service."
-    echo "  -rf, --remove-force            Confirm removal of the associated script file."
-    echo "  -env, --environment <env_vars> Set environment variables (VAR=value)."
-    echo "  -n, --name <name>              Specify a custom name for the service (default: myservice)."
-    echo "  -v, --version                  Show script version."
-    echo "  -e, --error                    Display error codes and their meanings."
-    echo "  -h, --help                     Display this help."
-    echo ""
-    echo "Examples:"
-    echo "  $0 --description \"My custom service\" --exe \"/path/to/executable\" --user \"myuser\""
-    echo "  $0 --exe \"/path/to/executable\" --type forking --env \"MY_VAR=somevalue\""
-    echo "  $0 --exe \"/path/to/executable\" --documentation \"https://docs.example.com\""
-    echo "  $0 --remove-systemd \"myservice1.service\" --remove-script-file"
-    echo "  $0 --copy-script /path/to/script --csf --exe \"/path/to/executable\""
-    echo "  $0 --name \"customservice\" --exe \"/path/to/executable\""
-}
-
 # Script version
-SCRIPT_VERSION="1.0.0"
+SCRIPT_VERSION="1.0.1"
 
 # Default values
 description="Service managed by the script"
@@ -79,29 +44,80 @@ force_replace=false
 remove_script=false
 base_name="myservice"  # Default base name for the service
 
+# Print version information
+print_version() {
+    echo "$0 version $SCRIPT_VERSION"
+    exit $ERROR_OK
+}
+
+display_help() {
+    echo "Usage: $0 [OPTIONS]"
+    echo ""
+    echo "Options:"
+    echo "  -d, --description <string>     Service description."
+    echo "  -doc, --documentation <string> Documentation URL."
+    echo "  -a, --after <string>           List of services to start after this one."
+    echo "  -b, --before <string>          List of services to start before this one."
+    echo "  -w, --wants <string>           List of services this one wants."
+    echo "  -wb, --wantedby <string>       List of services that want this one."
+    echo "  -r, --requires <string>        List of services this one requires."
+    echo "  -cf, --conflicts <string>      List of services that conflict with this one."
+    echo "  -t, --type <string>            Service type (simple, forking, oneshot, etc.)."
+    echo "  -exe, --execstart <string>     Command to start the service."
+    echo "  -u, --user <string>            User to run the service as."
+    echo "  -g, --group <string>           Group to run the service as."
+    echo "  -cs, --copy-script <path>      Specifies the path of the script to copy (default $script_path_default)."
+    echo "  -csf, --copy-script-force      Force overwrite the script file without confirmation."
+    echo "  -rm, --remove <service>        Remove the specified systemd service."
+    echo "  -p, --purge                    Purge the associated script file."
+    echo "  -env, --environment <env_vars> Set environment variables (VAR=value)."
+    echo "  -n, --name <name>              Specify a custom name for the service (default: myservice)."
+    echo "  -v, --version                  Show script version."
+    echo "  -er, --error                   Display error codes and their meanings."
+    echo "  -h, --help                     Display this help."
+    echo ""
+    echo "Examples:"
+    echo "  $0 --description \"My custom service\" --exe \"/path/to/executable\" --user \"myuser\""
+    echo "  $0 --exe \"/path/to/executable\" --type forking --env \"MY_VAR=somevalue\""
+    echo "  $0 --exe \"/path/to/executable\" --documentation \"https://docs.example.com\""
+    echo "  $0 --remove-systemd \"myservice1.service\" --remove-script-file"
+    echo "  $0 --copy-script /path/to/script --csf --exe \"/path/to/executable\""
+    echo "  $0 --name \"customservice\" --exe \"/path/to/executable\""
+}
+
 # Error codes (documenting the exit codes)
-ERROR_INVALID_FILE=60    # The file does not exist or is not valid
-ERROR_NOT_EXECUTABLE=61   # The file is not executable
-ERROR_FILE_COPY_FAILED=62 # The file copy operation failed
-ERROR_PERMISSION_FAILED=63 # The chmod operation failed
-ERROR_SERVICE_START_FAILED=64 # The service failed to start
-ERROR_MISSING_ARGUMENT=65  # Missing argument for a required option
-ERROR_SERVICE_FILE_CREATION_FAILED=66 # The systemd service file creation failed
+ERROR_OK=0              # OK
+ERROR_INVALID_OPTION=10  # Invalid or unknown option provided
+ERROR_MISSING_ARGUMENT=11  # Missing argument for a required option
+ERROR_OPTION_CONFLICT=12  # Conflict between 2 arguments
+ERROR_INVALID_FILE=20    # The file does not exist or is not valid
+ERROR_NOT_EXECUTABLE=21   # The file is not executable
+ERROR_FILE_COPY_FAILED=22 # The file copy operation failed
+ERROR_PERMISSION_FAILED=23 # The chmod operation failed
+ERROR_INSTALL_FAILED=24  # The installation failed
+ERROR_UNINSTALL_FAILED=25  # The uninstallation failed
+ERROR_SERVICE_START_FAILED=60 # The service failed to start
+ERROR_SERVICE_FILE_CREATION_FAILED=61 # The systemd service file creation failed
 ERROR_SERVICE_REMOVE_FAILED=70 # Failed to remove systemd service
 ERROR_SERVICE_INVALID_DOC_TAG=71 # The service file does not contain "autoscript" in the Documentation tag
 ERROR_SCRIPT_REMOVE_FAILED=72 # Unable to remove the script file
 ERROR_SERVICE_FILE_NOT_FOUND=73 # The service file does not exist
 ERROR_SERVICE_FILE_REMOVE_FAILED=74 # Unable to remove the service file
-ERROR_INVALID_OPTION=10  # Invalid or unknown option provided
+
 
 # Display error codes
 display_error_codes() {
     echo "Error Codes and their Meanings:"
     echo "---------------------------------------------------"
-    echo " $ERROR_INVALID_FILE    : The file does not exist or is not valid."
-    echo " $ERROR_NOT_EXECUTABLE   : The file is not executable."
-    echo " $ERROR_FILE_COPY_FAILED : The file copy operation failed."
+    echo " $ERROR_INVALID_OPTION    : Invalid or unknown option provided."
+    echo " $ERROR_MISSING_ARGUMENT  : Missing argument for a required option."
+    echo " $ERROR_OPTION_CONFLICT   : Conflict between 2 arguments."
+    echo " $ERROR_INVALID_FILE      : The file does not exist or is not valid."
+    echo " $ERROR_NOT_EXECUTABLE    : The file is not executable."
+    echo " $ERROR_FILE_COPY_FAILED  : The file copy operation failed."
     echo " $ERROR_PERMISSION_FAILED : The chmod operation failed."
+    echo " $ERROR_INSTALL_FAILED    : The installation failed."
+    echo " $ERROR_UNINSTALL_FAILED  : The uninstallation failed."
     echo " $ERROR_SERVICE_START_FAILED : The service failed to start."
     echo " $ERROR_MISSING_ARGUMENT  : Missing argument for a required option."
     echo " $ERROR_SERVICE_FILE_CREATION_FAILED : The systemd service file creation failed."
@@ -110,7 +126,6 @@ display_error_codes() {
     echo " $ERROR_SCRIPT_REMOVE_FAILED : Unable to remove the script file."
     echo " $ERROR_SERVICE_FILE_NOT_FOUND : The service file does not exist."
     echo " $ERROR_SERVICE_FILE_REMOVE_FAILED : Unable to remove the service file."
-    echo " $ERROR_INVALID_OPTION    : Invalid or unknown option provided."
     echo "---------------------------------------------------"
 }
 
@@ -237,20 +252,6 @@ verify_and_copy_script() {
     return 0
 }
 
-# Generate available service file name
-generate_service_filename() {
-    local service_filename="${base_name}1.service"
-    local counter=1
-
-    # Check if the file exists, increment the number if necessary
-    while [ -f "/etc/systemd/system/$service_filename" ]; do
-        counter=$((counter + 1))
-        service_filename="${base_name}${counter}.service"
-    done
-
-    echo "$service_filename"
-}
-
 # Remove the systemd service and its script
 remove_systemd_service() {
     if [ -z "$1" ]; then
@@ -275,31 +276,41 @@ remove_systemd_service() {
 
     echo "Removing systemd service: $service_to_remove..."
 
+    # Stop and disable the service
+    sudo systemctl stop "$service_to_remove"
+    sudo systemctl disable "$service_to_remove"
+
     # Extract the script path from the service file
     script_path_to_remove=$(grep -oP '(?<=^ExecStart=).+' "$service_file" | tr -d ' ')
 
+    # Check if the script file exists
     if [ -n "$script_path_to_remove" ]; then
-        if [ "$remove_script" = true ]; then
-            # Confirm removal of the associated script file
-            read -p "Do you want to remove the associated script file $script_path_to_remove? (y/n): " response
-            if [[ "$response" == "y" || "$response" == "Y" ]]; then
-                echo "Removing associated script: $script_path_to_remove..."
-                sudo rm -f "$script_path_to_remove"
-                if [ $? -ne 0 ]; then
-                    echo "Error: Unable to remove the script file."
-                    exit $ERROR_SCRIPT_REMOVE_FAILED
+        if [ ! -f "$script_path_to_remove" ]; then
+            echo "Associated script file not found: $script_path_to_remove."
+        else
+            # if an environment is set, send it to the script
+            if [ -n "$environment" ]; then
+                echo "Calling the script with the environment variables to clean"
+                $script_path_to_remove $environment
+            fi
+            if [ "$remove_script" = true ]; then
+                # Confirm removal of the associated script file
+                read -p "Do you want to remove the associated script file $script_path_to_remove? (y/n): " response
+                if [[ "$response" == "y" || "$response" == "Y" ]]; then
+                    echo "Removing associated script: $script_path_to_remove..."
+                    sudo rm -f "$script_path_to_remove"
+                    if [ $? -ne 0 ]; then
+                        echo "Error: Unable to remove the script file."
+                        exit $ERROR_SCRIPT_REMOVE_FAILED
+                    fi
+                else
+                    echo "The script file was not removed."
                 fi
-            else
-                echo "The script file was not removed."
             fi
         fi
     else
         echo "No script file associated or not found."
     fi
-
-    # Stop and disable the service
-    sudo systemctl stop "$service_to_remove"
-    sudo systemctl disable "$service_to_remove"
     
     # Remove the service file
     sudo rm -f "$service_file"
@@ -315,6 +326,18 @@ remove_systemd_service() {
 # Argument parsing
 while [[ $# -gt 0 ]]; do
     case $1 in
+        -v|--version)
+            print_version
+            exit $ERROR_OK
+            ;;
+        -er|--error)
+            display_error_codes
+            exit $ERROR_OK
+            ;;
+        -h|--help)
+            display_help
+            exit $ERROR_OK
+            ;;
         -d|--description)
             description="$2"
             shift 2
@@ -364,16 +387,17 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         -cs|--copy-script)
-             # Check if a value is provided for -cs
+            # Check if a value is provided for -cs
             if [ -z "$2" ] || [[ "$2" == -* ]]; then
                 # If no value is provided or the value is another argument (starts with -), use the default path
                 script_path=$script_path_default
                 echo "No path provided for -cs. Using default path: $script_path_default"
+                shift
             else
                 # If a value is provided, assign it to script_path
                 script_path="$2"
+                shift 2
             fi
-            shift 2
             ;;
         -csf|--copy-script-force)
             force_replace=true
@@ -388,24 +412,12 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         -rm|--remove)
-            remove_systemd_service "$2"
-            exit 0
+            remove="$2"
+            shift 2
             ;;
-        -rf|--remove-force)
+        -p|--purge)
             remove_script=true
             shift 1
-            ;;
-        -v|--version)
-            echo "Script version: $SCRIPT_VERSION"
-            exit 0
-            ;;
-        -e|--error)
-            display_error_codes
-            exit 0
-            ;;
-        -h|--help)
-            display_help
-            exit 0
             ;;
         *)
             echo "Unknown option: $1"
@@ -413,6 +425,11 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+if [ -n "$remove" ]; then
+    remove_systemd_service "$remove"
+    exit $ERROR_OK
+fi
 
 # Validate required fields
 if [ -z "$execstart" ]; then
@@ -457,6 +474,10 @@ $([ -n "$standard_error" ] && echo "StandardError=$standard_error")
 [Install]
 WantedBy=${install_wantedby:-multi-user.target}
 EOF"
+if [ $? -ne 0 ]; then
+    echo "Error: Failed to create the service."
+    exit $ERROR_SERVICE_FILE_CREATION_FAILED
+fi
 
 echo "Systemd service file created at /etc/systemd/system/$service_file"
 
@@ -471,4 +492,4 @@ if [ $? -ne 0 ]; then
 fi
 
 echo "Service started successfully."
-exit 0
+exit $ERROR_OK
