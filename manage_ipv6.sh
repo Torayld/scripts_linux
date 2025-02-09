@@ -49,7 +49,7 @@ display_error_codes() {
     echo "---------------------------------------------------"
 }
 
-.source functions/update_file.sh
+source functions/update_file.sh
 
 # Enable or disable IPv6 based on the action
 manage_ipv6() {

@@ -15,12 +15,12 @@
 # Script can handle different command line to achieve its goal.
 # Script can handle wifi connection with wrong status and retry to connect.
 #
-# Version: 1.0.1
+# Version: 1.0.2
 # Author: Torayld
 # -------------------------------------------------------------------
 
 # Script version
-SCRIPT_VERSION="1.0.1"
+SCRIPT_VERSION="1.0.2"
 
 # Default values if not specified via arguments
 interface="wlan0"                           # Wireless interface name
@@ -69,10 +69,12 @@ ERROR_OK=0              # OK
 ERROR_INVALID_OPTION=10  # Invalid or unknown option provided
 ERROR_MISSING_ARGUMENT=11  # Missing argument for a required option
 ERROR_OPTION_CONFLICT=12  # Conflict between 2 arguments
-#ERROR_INVALID_FILE=20    # The file does not exist or is not valid
-#ERROR_NOT_EXECUTABLE=21   # The file is not executable
-#ERROR_FILE_COPY_FAILED=22 # The file copy operation failed
-#ERROR_PERMISSION_FAILED=23 # The chmod operation failed
+ERROR_ARGUMENT_WRONG=13  # Argument value is not valid
+ERROR_INVALID_FILE=20    # The file does not exist or is not valid
+ERROR_NOT_EXECUTABLE=21   # The file is not executable
+ERROR_FILE_COPY_FAILED=22 # The file copy operation failed
+ERROR_PERMISSION_FAILED=23 # The chmod operation failed
+ERROR_COPY_CANCELED=24 # The file copy operation canceled
 ERROR_FAILED_TO_RESET_INTERFACE=30  # Failed to reset the interface
 
 
@@ -83,14 +85,29 @@ display_error_codes() {
     echo " $ERROR_INVALID_OPTION    : Invalid or unknown option provided."
     echo " $ERROR_MISSING_ARGUMENT  : Missing argument for a required option."
     echo " $ERROR_OPTION_CONFLICT   : Conflict between 2 arguments."
-    #echo " $ERROR_INVALID_FILE      : The file does not exist or is not valid."
-    #echo " $ERROR_NOT_EXECUTABLE    : The file is not executable."
-    #echo " $ERROR_FILE_COPY_FAILED  : The file copy operation failed."
-    #echo " $ERROR_PERMISSION_FAILED : The chmod operation failed."
+    echo " $ERROR_ARGUMENT_WRONG    : Argument value is not valid."
+    echo " $ERROR_INVALID_FILE      : The file does not exist or is not valid."
+    echo " $ERROR_NOT_EXECUTABLE    : The file is not executable."
+    echo " $ERROR_FILE_COPY_FAILED  : The file copy operation failed."
+    echo " $ERROR_PERMISSION_FAILED : The chmod operation failed."
+    echo " $ERROR_COPY_CANCELED     : The file copy operation canceled."
     echo " $ERROR_FAILED_TO_RESET_INTERFACE : Failed to reset the interface."
     echo "---------------------------------------------------"
 }
 
+# Check if an argument is provided
+# Usage: check_argument <arg>
+# Example: check_argument "$1"
+# Returns 0 if an argument is provided, 1 otherwise
+check_argument(){
+    local arg="$1"
+
+    if [ -z "$arg" ] || [[ "$arg" == -* ]]; then # If no value is provided or the value is another argument (starts with -), use the default pat
+        return 1
+    else
+        return 0
+    fi
+}
 
 # Function to install the systemd service
 install_systemd_service() {
@@ -571,15 +588,6 @@ stop_hotspot() {
     return 0
 }
 
-check_argument(){
-    local arg="$1"
-
-    if [ -z "$arg" ] || [[ "$arg" == -* ]]; then # If no value is provided or the value is another argument (starts with -), use the default pat
-        return 1
-    else
-        return 0
-    fi
-}
 # Argument parsing
 while [[ "$1" != "" ]]; do
     case $1 in

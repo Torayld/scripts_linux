@@ -6,12 +6,12 @@
 # Script to generate, register, and remove systemd service files
 # Description: This script allows you to generate a systemd service file
 # with all possible parameters and options, register it, and remove it.
-# Version: 1.0.1
+# Version: 1.0.2
 # Author: Torayld
 # -------------------------------------------------------------------
 
 # Script version
-SCRIPT_VERSION="1.0.1"
+SCRIPT_VERSION="1.0.2"
 
 # Default values
 description="Service managed by the script"
@@ -90,12 +90,14 @@ ERROR_OK=0              # OK
 ERROR_INVALID_OPTION=10  # Invalid or unknown option provided
 ERROR_MISSING_ARGUMENT=11  # Missing argument for a required option
 ERROR_OPTION_CONFLICT=12  # Conflict between 2 arguments
+ERROR_ARGUMENT_WRONG=13  # Argument value is not valid
 ERROR_INVALID_FILE=20    # The file does not exist or is not valid
 ERROR_NOT_EXECUTABLE=21   # The file is not executable
 ERROR_FILE_COPY_FAILED=22 # The file copy operation failed
 ERROR_PERMISSION_FAILED=23 # The chmod operation failed
-ERROR_INSTALL_FAILED=24  # The installation failed
-ERROR_UNINSTALL_FAILED=25  # The uninstallation failed
+ERROR_COPY_CANCELED=24 # The file copy operation canceled
+ERROR_INSTALL_FAILED=40  # The installation failed
+ERROR_UNINSTALL_FAILED=41  # The uninstallation failed
 ERROR_SERVICE_START_FAILED=60 # The service failed to start
 ERROR_SERVICE_FILE_CREATION_FAILED=61 # The systemd service file creation failed
 ERROR_SERVICE_REMOVE_FAILED=70 # Failed to remove systemd service
@@ -112,10 +114,12 @@ display_error_codes() {
     echo " $ERROR_INVALID_OPTION    : Invalid or unknown option provided."
     echo " $ERROR_MISSING_ARGUMENT  : Missing argument for a required option."
     echo " $ERROR_OPTION_CONFLICT   : Conflict between 2 arguments."
+    echo " $ERROR_ARGUMENT_WRONG    : Argument value is not valid."
     echo " $ERROR_INVALID_FILE      : The file does not exist or is not valid."
     echo " $ERROR_NOT_EXECUTABLE    : The file is not executable."
     echo " $ERROR_FILE_COPY_FAILED  : The file copy operation failed."
     echo " $ERROR_PERMISSION_FAILED : The chmod operation failed."
+    echo " $ERROR_COPY_CANCELED     : The file copy operation canceled."
     echo " $ERROR_INSTALL_FAILED    : The installation failed."
     echo " $ERROR_UNINSTALL_FAILED  : The uninstallation failed."
     echo " $ERROR_SERVICE_START_FAILED : The service failed to start."

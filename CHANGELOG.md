@@ -3,7 +3,27 @@ All notable changes to this project will be documented in this file.
  
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased] - 2025-02-09
  
+Update and correct scripts
+ 
+### Added
+Script crontab.sh to Help cronjob creation
+ 
+### Changed
+systemd.sh v1.0.2 add error infos
+wifi_hotspot.sh v1.0.2 add error infos
+copy_file.sh v1.0.1 when file exist can keep both file with increment new file
+ 
+### Fixed
+copy_file.sh v1.0.1
+-fixed file/directory destination without extension and considering /path/to/file/ as folder and /path/to/file as file
+correct displaying replace file with info when calling from external script
+
+### Removed
+none
+
 ## [Unreleased] - 2025-02-02
  
 Update and correct script
