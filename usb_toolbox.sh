@@ -1,12 +1,12 @@
 #!/bin/bash
 # -------------------------------------------------------------------
 # USB Drive Toolbox
-# Version: 1.0.7
+# Version: 1.0.8
 # Author: Torayld
 # -------------------------------------------------------------------
 
 # Variables globales
-SCRIPT_VERSION="v1.0.7"
+SCRIPT_VERSION="v1.0.8"
 
 # Default parameters
 label=""                # Default label of the USB device
@@ -21,6 +21,11 @@ remove_fstab=false      # Default to not removing from fstab
 
 fstap_allready=false    # Flag to check if the partition is already in /etc/fstab
 
+
+script_path="$(cd "$(dirname "$0")" && pwd)"
+source $script_path/functions/errors_code.sh
+source $script_path/functions/checker.sh
+
 # Print version information
 print_version() {
     echo "$0 version $SCRIPT_VERSION"
@@ -32,13 +37,13 @@ display_help() {
     echo "Usage: $0 [options]"
     echo
     echo "Options:"
-    echo "  -m, --mount <path>               Specify the mount point (default: /mnt/usb)"
-    echo "  -u, --umount <path>              Umount the partition and remove the mount point"
-    echo "  -p, --partuuid <partuuid>        Specify the PARTUUID of the partition"
-    echo "  -s, --sd <partition>             Specify the partition directly (avoid auto-detection)"
+    echo "  -m, --mount=<path>               Specify the mount point (default: $mount_point)"
+    echo "  -u, --umount=<path>              Umount the partition and remove the mount point"
+    echo "  -p, --partuuid=<partuuid>        Specify the PARTUUID of the partition"
+    echo "  -s, --sd=<partition>             Specify the partition directly (avoid auto-detection)"
     echo "  -f, --fstab                      Add the partition to /etc/fstab for automatic mounting"
     echo "  -rf, --remove-fstab              Remove the partition from /etc/fstab for automatic mounting"
-    echo "  -si, --systemd-install <param>   Install as a systemd service with a parameter passed to the child script"
+    echo "  -si, --systemd-install[=param]   Install as a systemd service with a parameter passed to the child script"
     echo "  -sr, --systemd-remove            Remove the systemd service ONLY and exit"
     echo "  -v, --version                    Display the script version"
     echo "  -er, --error                     Display error codes and their meanings."
@@ -49,51 +54,6 @@ display_help() {
     echo "  2. --sd <partition>: If no PARTUUID is provided, the script will then use the partition identifier (e.g., /dev/sda1)."
     echo "  3. --label <label>: If neither PARTUUID nor partition identifier is provided, the script will search for a partition with the specified label."
     echo "  4. If none of the above is provided, the script will search for the last connected USB disk."
-}
-
-# Error codes (documenting the exit codes)
-ERROR_OK=0              # OK
-ERROR_INVALID_OPTION=10  # Invalid or unknown option provided
-ERROR_MISSING_ARGUMENT=11  # Missing argument for a required option
-ERROR_OPTION_CONFLICT=12  # Conflict between 2 arguments
-ERROR_INVALID_FILE=20    # The file does not exist or is not valid
-ERROR_NOT_EXECUTABLE=21   # The file is not executable
-ERROR_FILE_COPY_FAILED=22 # The file copy operation failed
-ERROR_PERMISSION_FAILED=23 # The chmod operation failed
-ERROR_INSTALL_FAILED=24  # The installation failed
-ERROR_UNINSTALL_FAILED=25  # The uninstallation failed
-ERROR_MOUNT_FAILED=30    # The mount operation failed
-ERROR_MOUNT_MOUNTED_DIFFERENT=31 # The disk is mounted but on a different mount point
-ERROR_DISK_NOT_FOUND=32   # The disk was not found
-ERROR_UMOUNT_FAILED=40    # The umount operation failed
-ERROR_UMOUNT_DIRECTORY_FAILED=41 # The umount directory removal failed
-ERROR_FSTAB_UPDATE=50 # Unable to update fstab
-ERROR_SERVICE_FILE_CREATION_FAILED=61 # The systemd service file creation failed
-ERROR_SERVICE_REMOVE_FAILED=70 # Failed to remove systemd service
-
-
-# Display error codes
-display_error_codes() {
-    echo "Error Codes and their Meanings:"
-    echo "---------------------------------------------------"
-    echo " $ERROR_INVALID_OPTION    : Invalid or unknown option provided."
-    echo " $ERROR_MISSING_ARGUMENT  : Missing argument for a required option."
-    echo " $ERROR_OPTION_CONFLICT   : Conflict between 2 arguments."
-    echo " $ERROR_INVALID_FILE      : The file does not exist or is not valid."
-    echo " $ERROR_NOT_EXECUTABLE    : The file is not executable."
-    echo " $ERROR_FILE_COPY_FAILED  : The file copy operation failed."
-    echo " $ERROR_PERMISSION_FAILED : The chmod operation failed."
-    echo " $ERROR_INSTALL_FAILED    : The installation failed."
-    echo " $ERROR_UNINSTALL_FAILED  : The uninstallation failed."
-    echo " $ERROR_MOUNT_FAILED      : The mount operation failed."
-    echo " $ERROR_MOUNT_MOUNTED_DIFFERENT : The disk is mounted but on a different mount point."
-    echo " $ERROR_DISK_NOT_FOUND     : The disk was not found."
-    echo " $ERROR_UMOUNT_FAILED     : The umount operation failed."
-    echo " $ERROR_UMOUNT_DIRECTORY_FAILED : The umount directory removal failed."
-    echo " $ERROR_FSTAB_UPDATE      : Unable to update fstab."
-    echo " $ERROR_SERVICE_FILE_CREATION_FAILED : The systemd service file creation failed."
-    echo " $ERROR_SERVICE_REMOVE_FAILED : Failed to remove systemd service."
-    echo "---------------------------------------------------"
 }
 
 # Function to check if the partition is already in /etc/fstab
@@ -119,11 +79,11 @@ install_systemd_service() {
     fi
 
     # Calling systemd.sh to install the service
-    output=$(./systemd.sh -exe "$0" -cs -csf -n "usb_mount" -env "PARTUUID='$partuuid' MOUNT_POINT='$mount_point'" \
-        -d "Mounting USB Drive with Systemd" $param)
+    output=$(./systemd.sh -exe="$0" -cs -n="usb_mount" -env="PARTUUID='$partuuid' MOUNT_POINT='$mount_point'" \
+        -d="Mounting USB Drive with Systemd" $param)
     exit_code=$?
 
-    if [ $exit_code -eq 0 ]; then
+    if [ $exit_code -eq $ERROR_OK ]; then
         echo "Systemd service installed successfully."
         exit $ERROR_OK
     else
@@ -153,7 +113,7 @@ remove_systemd_service() {
     fi
 
     # Call the child script to remove the service
-    output=$(./systemd.sh -rm $result -env "-u $mount_point")
+    output=$(./systemd.sh -rm=$result -env="-u=$mount_point")
     exit_code=${PIPESTATUS[0]} #Capture exit code
 
     # Check the exit status of the child script
@@ -340,17 +300,15 @@ while [[ $# -gt 0 ]]; do
             display_help
             exit $ERROR_OK
             ;;
-        -si=*|--systemd-install=*)
-            # Extraire la valeur après le "="
-            install_systemd="${1#*=}"
-            shift
-            ;;
         -si|--systemd-install)
-            if [[ -n "$2" && "$2" != -* ]]; then
-                install_systemd="$2"
-                shift 2
+            install_systemd=true
+            ;;
+        -si=*|--systemd-install=*)
+            if ! check_argument "$1"; then
+                echo "Error: Missing value for option $1"
+                exit $ERROR_MISSING_ARGUMENT
             else
-                install_systemd=true
+                install_systemd="${1#*=}"
                 shift
             fi
             ;;
@@ -358,52 +316,40 @@ while [[ $# -gt 0 ]]; do
             uninstall_systemd=true
             shift
             ;;
-        -m|--mount)
-            if [[ "$2" =~ ^\".*\"$ ]]; then
-                mount_point=$(echo "$2" | sed 's/^"//' | sed 's/"$//')
-                shift 2
-            elif [ -n "$2" ] && [[ "$2" != -* ]]; then
-                mount_point="$2"
-                shift 2
-            else
-                echo "Error: --mount requires a parameter."
+        -m=*|--mount=*)
+            if ! check_argument "$1"; then
+                echo "Error: Missing value for option $1"
                 exit $ERROR_MISSING_ARGUMENT
+            else
+                mount_point="${1#*=}"
+                shift
             fi
             ;;
-        -u|--umount)
-            if [[ "$2" =~ ^\".*\"$ ]]; then
-                umount_target=$(echo "$2" | sed 's/^"//' | sed 's/"$//')
-                shift 2
-            elif [ -n "$2" ] && [[ "$2" != -* ]]; then
-                umount_target="$2"
-                shift 2
-            else
-                echo "Error: --mount requires a parameter."
+        -u=*|--umount=*)
+            if ! check_argument "$1"; then
+                echo "Error: Missing value for option $1"
                 exit $ERROR_MISSING_ARGUMENT
+            else
+                umount_target="${1#*=}"
+                shift
             fi
             ;;
-        -p|--partuuid)
-            if [[ "$2" =~ ^\".*\"$ ]]; then
-                partuuid=$(echo "$2" | sed 's/^"//' | sed 's/"$//')
-                shift 2
-            elif [ -n "$2" ] && [[ "$2" != -* ]]; then
-                partuuid="$2"
-                shift 2
-            else
-                echo "Error: --partuuid requires a parameter."
+        -p=*|--partuuid=*)
+            if ! check_argument "$1"; then
+                echo "Error: Missing value for option $1"
                 exit $ERROR_MISSING_ARGUMENT
+            else
+                partuuid="${1#*=}"
+                shift
             fi
             ;;
-        -s|--sd)
-            if [[ "$2" =~ ^\".*\"$ ]]; then
-                selected_partition=$(echo "$2" | sed 's/^"//' | sed 's/"$//')
-                shift 2
-            elif [ -n "$2" ] && [[ "$2" != -* ]]; then
-                selected_partition="$2"
-                shift 2
-            else
-                echo "Error: --sd requires a parameter."
+        -s=*|--sd=*)
+            if ! check_argument "$1"; then
+                echo "Error: Missing value for option $1"
                 exit $ERROR_MISSING_ARGUMENT
+            else
+                selected_partition="${1#*=}"
+                shift
             fi
             ;;
         -f|--fstab)

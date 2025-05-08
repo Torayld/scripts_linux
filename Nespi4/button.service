@@ -1,0 +1,17 @@
+[Unit]
+Description=Script gestion GPIO Button
+After=multi-user.target
+
+[Service]
+ExecStart=/usr/bin/python3 /usr/local/bin/button.py
+WorkingDirectory=/usr/local/bin
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+# To send SIGTERM to all subprocess
+KillMode=control-group
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target

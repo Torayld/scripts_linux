@@ -3,23 +3,23 @@
 # -------------------------------------------------------------------
 # Crontab manager
 #
-# Version: 1.0.0
+# Version: 1.0.1
 # Author: Torayld
 # -------------------------------------------------------------------
 
 # Script version
-SCRIPT_VERSION="1.0.0"
+SCRIPT_VERSION="1.0.1"
 
 # Default values
 NAME="my_cron_jobs"
-MIN="0"
-HOUR="0"
+MIN="*"
+HOUR="*"
 DOM="*"
 MON="*"
 DOW="*"
 USER="$(whoami)"
 LOG_FILE=""
-SCRIPT_PATH="/usr/local/bin"
+script_path_default="/usr/local/bin"
 FORCE_REPLACE=false
 REMOVE_SCRIPT=false
 APPEND=false
@@ -28,6 +28,11 @@ USER_FOLDER=false
 # Valid months and days
 VALID_MONTHS="jan feb mar apr may jun jul aug sep oct nov dec"
 VALID_DAYS="mon tue wed thu fri sat sun"
+
+script_path="$(cd "$(dirname "$0")" && pwd)"
+source $script_path/functions/errors_code.sh
+source $script_path/functions/checker.sh
+source $script_path/functions/copy_file.sh
 
 # Print version information
 print_version() {
@@ -46,7 +51,8 @@ display_help() {
     echo "  -mon, --month <value>          Month (jan, feb, mar, apr, may, jun, jul, aug, sep, oct, nov, dec) when the command should run. Default: $DEFAULT_MON"
     echo "  -dow, --day-of-week <value>    Day of the week (mon, tue, wed, thu, fri, sat, sun) when the command should run. Default: $DEFAULT_DOW"
     echo "  -u, --user <value>             User that the command should run as. Default: $DEFAULT_USER"
-    echo "  -s, --script <value>           Script or command to run."
+    echo "  -exe, --execstart <value>      Script or command to run."
+    echo "  -ep, --exe-param <env_vars>    Set param for script (VAR=value)."
     echo "  -cs, --copy-script [path]      Specifies the path of the script to copy (default $script_path_default)."
     echo "  -csf, --copy-script-force      Force overwrite the script file without confirmation."
     echo "  -l, --log <value>              Log file where the output of the command should be redirected."
@@ -56,77 +62,6 @@ display_help() {
     echo "  -er, --error                   Display error codes and their meanings."
     echo "  -h, --help                     Display this help."
     echo ""
-}
-
-# Error codes (documenting the exit codes)
-ERROR_OK=0              # OK
-ERROR_INVALID_OPTION=10  # Invalid or unknown option provided
-ERROR_MISSING_ARGUMENT=11  # Missing argument for a required option
-ERROR_OPTION_CONFLICT=12  # Conflict between 2 arguments
-ERROR_ARGUMENT_WRONG=13  # Argument value is not valid
-ERROR_INVALID_FILE=20    # The file does not exist or is not valid
-ERROR_NOT_EXECUTABLE=21   # The file is not executable
-ERROR_FILE_COPY_FAILED=22 # The file copy operation failed
-ERROR_PERMISSION_FAILED=23 # The chmod operation failed
-ERROR_COPY_CANCELED=24 # The file copy operation canceled
-
-
-# Display error codes
-display_error_codes() {
-    echo "Error Codes and their Meanings:"
-    echo "---------------------------------------------------"
-    echo " $ERROR_INVALID_OPTION    : Invalid or unknown option provided."
-    echo " $ERROR_MISSING_ARGUMENT  : Missing argument for a required option."
-    echo " $ERROR_OPTION_CONFLICT   : Conflict between 2 arguments."
-    echo " $ERROR_ARGUMENT_WRONG    : Argument value is not valid."
-    echo " $ERROR_INVALID_FILE      : The file does not exist or is not valid."
-    echo " $ERROR_NOT_EXECUTABLE    : The file is not executable."
-    echo " $ERROR_FILE_COPY_FAILED  : The file copy operation failed."
-    echo " $ERROR_PERMISSION_FAILED : The chmod operation failed."
-    echo " $ERROR_COPY_CANCELED     : The file copy operation canceled."
-    echo "---------------------------------------------------"
-}
-
-# Check if an argument is provided
-# Usage: check_argument "$1" [int|str|intalpha] by default alphanum
-# Example: check_argument "98" "int" returns 0
-# Example: check_argument "98" "str" returns 1
-# Example: check_argument "alpha" "int" returns 1
-# Example: check_argument "alpha" "str" returns 0
-# Returns 0 if an argument is provided, 1 otherwise
-check_argument(){
-    local arg="$1"
-    local arg_type=${2:-"alphanum"}
-
-    if [[ "$arg_type" != 'int' && "$arg_type" != 'str' && "$arg_type" != 'alphanum' ]]; then
-        echo "Error: Invalid argument type. Must be 'int' or 'str'."
-        return 1
-    fi
-
-    if [ -z "$arg" ] || [[ "$arg" == -* ]]; then # If no value is provided or the value is another argument (starts with -), use the default pat
-        return 1
-    else
-        if [[ "$arg_type" == 'int' ]] && ! [[ "$arg" =~ ^[0-9]+$ ]]; then
-            return 1
-        elif [[ "$arg_type" == 'str' ]] && ! [[ "$arg" =~ ^[a-zA-Z]+$ ]]; then
-            return 1
-        fi
-        return 0
-    fi
-}
-
-# Check if user exists
-# Usage: check_user "$1"
-# Example: check_user "user_unknown"
-# Returns 0 if the user exists, 1 otherwise 
-check_user() {
-    local user="$1"
-    if ! id "$user" &>/dev/null; then
-        echo "Error: User $user does not exist."
-        return 1
-    fi
-
-    return 0
 }
 
 # Check if the user has permission to use cron
@@ -157,76 +92,6 @@ check_cron_permission() {
     return 0
 }
 
-# Check if the user has permission to execute the script
-# Usage: check_user_script_permission "$1" "$2"
-# Example: check_user_script_permission "/path/to/script.sh" "user_unknown"
-# Returns 0 if the user has permission to execute the script, 1 otherwise
-check_user_script_permission() {
-    local script_path=$1
-    local username=$2
-
-    # Check if the script file exists
-    if [ ! -f "$script_path" ]; then
-        echo "The script file does not exist."
-        return 1
-    fi
-
-    # Get the file's owner and group
-    script_owner=$(stat -c "%U" "$script_path")
-    script_group=$(stat -c "%G" "$script_path")
-
-    # Check if the user is the owner
-    if [ "$username" == "$script_owner" ]; then
-        if [ "$(stat -c "%A" "$script_path" | cut -b 2)" == "x" ]; then
-            echo "The user $username is the owner and can execute the script."
-            return 0
-        else
-            echo "The user $username is the owner but cannot execute the script."
-        fi
-    # Check if the user belongs to the same group
-    elif groups "$username" | grep -qw "$script_group"; then
-        if [ "$(stat -c "%A" "$script_path" | cut -b 5)" == "x" ]; then
-            echo "The user $username belongs to the same group and can execute the script."
-            return 0
-        else
-            echo "The user $username belongs to the same group but cannot execute the script."
-        fi
-    # Check if the user has 'others' permission
-    elif [ "$(stat -c "%A" "$script_path" | cut -b 8)" == "x" ]; then
-        echo "The user $username is neither the owner nor in the same group but can execute the script as others."
-        return 0
-    else
-        echo "The user $username cannot execute the script."
-        return 1
-    fi
-}
-
-# Function to check if a specific user can write to a file
-# Usage: check_user_write_to_file "$1" "$2"
-# Example: check_user_write_to_file "user_unknown" "/path/to/file"
-# Returns 0 if the user can write to the file, 1 otherwise
-check_user_write_to_file() {
-    local user="$1"
-    local file="$2"
-
-    # Check if the file exists
-    if [[ ! -e "$file" ]]; then
-        echo "The file does not exist."
-        return 1
-    fi
-
-    # Check if the file is writable by the specified user
-    if sudo -u "$user" test -w "$file"; then
-        echo "User '$user' can write to the file."
-        return 0
-    else
-        echo "User '$user' cannot write to the file."
-        return 1
-    fi
-}
-
-source functions/copy_file.sh
-
 # Argument parsing
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -242,130 +107,148 @@ while [[ $# -gt 0 ]]; do
             display_help
             exit $ERROR_OK
             ;;
-        -n|--name)
-            if ! check_argument "$2"; then
+        -n=*|--name=*)
+            if ! check_argument "$1"; then
                 echo "Error: Missing value for option $1"
                 exit $ERROR_MISSING_ARGUMENT
             else
-                NAME="$2"
-                shift 2
+                NAME="${1#*=}"
+                shift
             fi
             ;;
-        -m|--minute)
-            if ! check_argument "$2"; then
+        -m=*|--minute=*)
+            if ! check_argument "$1"; then
                 echo "Error: Missing value for option $1"
                 exit $ERROR_MISSING_ARGUMENT
-            elif ! [[ "$2" =~ ^([0-5]?[0-9])$|^([0-5]?[0-9]-[0-5]?[0-9])$|^(\*/[1-9][0-9]*)$|^([0-5]?[0-9](,[0-5]?[0-9])*)$ ]]; then
+            elif ! [[ "${1#*=}" =~ ^([0-5]?[0-9])$|^([0-5]?[0-9])$|^([0-5]?[0-9]-[0-5]?[0-9])$|^(\*/[1-9][0-9]*)$|^([0-5]?[0-9](,[0-5]?[0-9])*)$ ]]; then
+                echo "Error: Inalid format value for option $1"
                 exit $ERROR_INVALID_OPTION
             else
-                MIN="$2"
-                shift 2
+                MIN="${1#*=}"
+                shift
             fi
             ;;
-        -h|--hour)
-            if ! check_argument "$2"; then
+        -h=*|--hour=*)
+            if ! check_argument "$1"; then
                 echo "Error: Missing value for option $1"
                 exit $ERROR_MISSING_ARGUMENT
-            elif ! [[ "$2" =~ ^([0-2]?[0-3])$|^([0-2]?[0-3]-[0-2]?[0-3])$|^(\*/[1-9][0-3]*)$|^([0-2]?[0-3](,[0-2]?[0-3])*)$ ]]; then
+            elif ! [[ "${1#*=}" =~ ^([0-2]?[0-3])$|^([0-2]?[0-3]-[0-2]?[0-3])$|^(\*/[1-9][0-3]*)$|^([0-2]?[0-3](,[0-2]?[0-3])*)$ ]]; then
+                echo "Error: Inalid format value for option $1"
                 exit $ERROR_INVALID_OPTION
             else
-                HOUR="$2"
-                shift 2
+                HOUR="${1#*=}"
+                shift
             fi
             ;;
-        -dom|--day-of-month)
-            if ! check_argument "$2"; then
+        -dom=*|--day-of-month=*)
+            if ! check_argument "$1"; then
                 echo "Error: Missing value for option $1"
                 exit $ERROR_MISSING_ARGUMENT
-            elif ! [[ "$2" =~ ^([1-9]|[12][0-9]|3[01])$|^([1-9]|[12][0-9]|3[01])-([1-9]|[12][0-9]|3[01])$|^(\*/[1-9][0-9]*)$|^([1-9]|[12][0-9]|3[01])(,([1-9]|[12][0-9]|3[01]))*$ ]]; then
+            elif ! [[ "${1#*=}" =~ ^([1-9]|[12][0-9]|3[01])$|^([1-9]|[12][0-9]|3[01])-([1-9]|[12][0-9]|3[01])$|^(\*/[1-9][0-9]*)$|^([1-9]|[12][0-9]|3[01])(,([1-9]|[12][0-9]|3[01]))*$ ]]; then
+                echo "Error: Inalid format value for option $1"
                 exit $ERROR_INVALID_OPTION
             else
-                DOM="$2"
-                shift 2
+                DOM="${1#*=}"
+                shift
             fi
             ;;
-        -mon|--month)
-            if ! check_argument "$2" "str"; then
+        -mon=*|--month=*)
+            if ! check_argument "$1" "str"; then
                 echo "Error: Missing value for option $1"
                 exit $ERROR_MISSING_ARGUMENT
-            #elif [[ ! "$VALID_MONTHS" =~ (^|[[:space:]])"$2"($|[[:space:]]) ]] && ! [[ "$2" =~ ^[0-9\*/,-]+$ ]]; then
-            elif ! [[ "$2" =~ ^(0?[1-9]|1[0-2])$|^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)$|^([0-9]{1,2}|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)-([0-9]{1,2}|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)$|^(\*/[1-9][0-9]*)$|^([0-9]{1,2}|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)(,([0-9]{1,2}|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec))*$ ]]; then
-                echo "Error: Invalid month format."
+            #elif [[ ! "$VALID_MONTHS" =~ (^|[[:space:]])"${1#*=}"($|[[:space:]]) ]] && ! [[ "${1#*=}" =~ ^[0-9\*/,-]+$ ]]; then
+            elif ! [[ "${1#*=}" =~ ^(0?[1-9]|1[0-2])$|^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)$|^([0-9]{1,2}|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)-([0-9]{1,2}|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)$|^(\*/[1-9][0-9]*)$|^([0-9]{1,2}|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)(,([0-9]{1,2}|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec))*$ ]]; then
+                echo "Error: Inalid format value for option $1"
                 exit $ERROR_INVALID_OPTION
             else
-               MON="$2"
-               shift 2
+               MON="${1#*=}"
+               shift
             fi
             ;;
-        -dow|--day-of-week)
-            if ! check_argument "$2" "str"; then
+        -dow=*|--day-of-week=*)
+            if ! check_argument "$1" "str"; then
                 echo "Error: Missing value for option $1"
                 exit $ERROR_MISSING_ARGUMENT
-            elif ! [[ "$2" =~ ^([1-7])$|^(mon|tue|wed|thu|fri|sat|sun)$|^([1-7])-([1-7])$|^(\*/[1-9][0-9]*)$|^([1-7]|mon|tue|wed|thu|fri|sat|sun)(,([1-7]|mon|tue|wed|thu|fri|sat|sun))*$ ]]; then
+            elif ! [[ "${1#*=}" =~ ^([1-7])$|^(mon|tue|wed|thu|fri|sat|sun)$|^([1-7])-([1-7])$|^(\*/[1-9][0-9]*)$|^([1-7]|mon|tue|wed|thu|fri|sat|sun)(,([1-7]|mon|tue|wed|thu|fri|sat|sun))*$ ]]; then
             #elif [[ ! "$VALID_DAYS" =~ (^|[[:space:]])"$DOW"($|[[:space:]]) ]] && ! [[ "$DOW" =~ ^[0-9\*/,-]+$ ]]; then
-                echo "Error: Invalid day format."
-                exit 1
+                echo "Error: Inalid format value for option $1"
+                exit $ERROR_INVALID_OPTION
             else
-                DOW="$2"
-                shift 2
+                DOW="${1#*=}"
+                shift
             fi
             ;;
-        -u|--user)
-            if ! check_argument "$2"; then
+        -u=*|--user=*)
+            if ! check_argument "$1"; then
                 echo "Error: Missing value for option $1"
                 exit $ERROR_MISSING_ARGUMENT
-            fi
-            USER="$2"
-            shift 2
-            if ! check_user "$USER"; then
-                exit $ERROR_ARGUMENT_WRONG
-            fi
+            else
+                USER="${1#*=}"
+                shift
+                if ! check_user "$USER"; then
+                    exit $ERROR_ARGUMENT_WRONG
+                fi
 
-            if ! check_cron_permission "$USER"; then
-                exit $ERROR_ARGUMENT_WRONG
+                if ! check_cron_permission "$USER"; then
+                    exit $ERROR_ARGUMENT_WRONG
+                fi
             fi
             ;;
-        -s|--script)
-            if ! check_argument "$2"; then
+        -exe=*|--execstart=*)
+            if ! check_argument "$1"; then
                 echo "Error: Missing value for option $1"
                 exit $ERROR_MISSING_ARGUMENT
+            else
+                SCRIPT="${1#*=}"
+                shift
             fi
-            SCRIPT="$2"
-            shift 2
-            if ! check_user_script_permission "$SCRIPT" "$USER"; then
-                exit $ERROR_ARGUMENT_WRONG
+            ;;
+        -ep=*|--exe-param=*)
+            if ! check_argument "$1"; then
+                echo "Error: Missing value for option $1"
+                exit $ERROR_MISSING_ARGUMENT
+            else
+                # If a value is provided, assign it to script_path
+                SCRIPT_PARAM="${1#*=}"
+                shift
+            fi
+            ;;
+        -cs=*|--copy-script=*)
+            if ! check_argument "$1"; then
+                echo "Error: Missing value for option $1"
+                exit $ERROR_MISSING_ARGUMENT
+            else
+                # If a value is provided, assign it to script_path
+                SCRIPT_PATH="${1#*=}"
+                shift
             fi
             ;;
         -cs|--copy-script)
-            if ! check_argument "$2"; then
-                echo "Error: Missing value for option $1"
-                exit $ERROR_MISSING_ARGUMENT
-            fi
-            # If a value is provided, assign it to script_path
-            SCRIPT_PATH="$2"
-            shift 2
+            SCRIPT_PATH=$script_path_default
+            shift
             ;;
         -csf|--copy-script-force)
             FORCE_REPLACE=true
-            shift 1
+            shift
             ;;
         -a|--append)
             APPEND=true
-            shift 1
+            shift
             ;;
         -u|--user)
             USER_FOLDER=true
-            shift 1
+            shift
             ;;
-        -l|--log)
-            if ! check_argument "$2"; then
+        -l=*|--log=*)
+            if ! check_argument "$1"; then
                 echo "Error: Missing value for option $1"
                 exit $ERROR_MISSING_ARGUMENT
-            fi
-            LOG_FILE="$2"
-            shift 2
-            if ! check_user_write_to_file "$USER" "$LOG_FILE"; then
-                exit $ERROR_ARGUMENT_WRONG
+            else
+                LOG_FILE="${1#*=}"
+                shift
+                if ! check_user_write_to_file "$USER" "$LOG_FILE"; then
+                    exit $ERROR_ARGUMENT_WRONG
+                fi
             fi
             ;;
         *)
@@ -385,42 +268,64 @@ fi
 if [ -n "$SCRIPT_PATH" ]; then
     echo "Copying $SCRIPT to $SCRIPT_PATH"
     copy_file "$SCRIPT" "$SCRIPT_PATH"
-    return=$?
-    if [ $return -ne $ERROR_OK ]; then
-        exit $return
+    ret=$?
+    if [ $ret -ne $ERROR_OK ]; then
+        exit $ret
+    fi
+    copy_dependencies "$SCRIPT" "$SCRIPT_PATH"
+    ret=$?
+    if [ $ret -ne $ERROR_OK ]; then
+        exit $ret
     fi
     SCRIPT=$copy_file_return
     echo "Final Script path : $SCRIPT"
 fi
 
+# Check if the user has permission to execute the script
+if [ -n "$script_path" ]; then
+    if ! check_user_script_permission "$SCRIPT" "$USER"; then
+        exit $ERROR_PERMISSION_FAILED
+    fi
+fi
+
+# Adding script param
+if [ -n "$SCRIPT_PARAM" ]; then
+    SCRIPT="$SCRIPT $SCRIPT_PARAM"
+fi
+
 # Selecting destination folder for cron
 if [ "$USER_FOLDER" = false ]; then
-    CRON_PATH='/etc/cron.d/'$USER'_'$NAME
+    CRON_PATH='/etc/cron.d/'
+    NAME=$USER'_'$NAME
+    if [ -n "LOG_FILE" ]; then
+        LOG_FILE="/var/log/cron_$NAME.log"
+    fi
     CRON_EXEMPLE="# *  *  *  *  *  user command to be executed"
-    CRON_EXE="$MIN $HOUR $DOM $MON $DOW $USER $SCRIPT $LOG_FILE"
+    CRON_EXE="$MIN $HOUR $DOM $MON $DOW $USER $SCRIPT >> $LOG_FILE 2>&1"
 else
-    CRON_PATH="/var/spool/cron/crontabs/$USER"
+    CRON_PATH="/var/spool/cron/crontabs/$NAME"
+    if [ -n "LOG_FILE" ]; then
+        LOG_FILE="/var/log/cron_$NAME.log"
+    fi
     CRON_EXEMPLE="# *  *  *  *  *  command to be executed"
-    CRON_EXE="$MIN $HOUR $DOM $MON $DOW $SCRIPT $LOG_FILE"
+    CRON_EXE="$MIN $HOUR $DOM $MON $DOW $SCRIPT >> $LOG_FILE 2>&1"
     APPEND=true
 fi
 
 # if not append, make sure to have to not override file
-if [ "$APPEND" = false ]; then
+if [ "$APPEND" == false ]; then
     echo "Creating Job name $NAME into $CRON_PATH"
     tmpfile=$(mktemp)
-    echo '.' > $tempfile
+    echo '.' > $tmpfile
     copy_file "$tmpfile" "${CRON_PATH%/}/$NAME"
-    return=$?
-    if [ $return -ne $ERROR_OK ]; then
-        exit $return
+    ret=$?
+    if [ $ret -ne $ERROR_OK ]; then
+        exit $ret
     fi
     CRON_PATH=$copy_file_return
     echo "Job name : $NAME created into $CRON_PATH"
     rm "$tmpfile"
     rm "$CRON_PATH"
-else
-
 fi
 
 # Creating Header if not exist
@@ -428,7 +333,7 @@ if ! [ -f $CRON_PATH ]; then
     echo "# Example of job definition:" >> $CRON_PATH
     echo "# .---------------- minute (0 - 59)"  >> $CRON_PATH
     echo "# |  .------------- hour (0 - 23)" >> $CRON_PATH
-    echo "# |  |  .---------- day of month (1 - 31)" > $CRON_PATH
+    echo "# |  |  .---------- day of month (1 - 31)" >> $CRON_PATH
     echo "# |  |  |  .------- month (1 - 12) OR jan,feb,mar,apr ..." >> $CRON_PATH
     echo "# |  |  |  |  .---- day of week (0 - 6) (Sunday=0 or 7) OR sun,mon,tue,wed,thu,fri,sat" >> $CRON_PATH
     echo "# |  |  |  |  |" >> $CRON_PATH
@@ -436,4 +341,9 @@ if ! [ -f $CRON_PATH ]; then
 fi
 
 echo "$CRON_EXE" >> $CRON_PATH
-echo "Crontab entry added successfully."
+echo "Crontab entry added successfully into $CRON_PATH."
+sudo service cron reload
+if [ $? -ne 0 ]; then
+    echo "Error: Failed to reload cron service."
+    exit 1
+fi

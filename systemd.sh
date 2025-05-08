@@ -6,12 +6,12 @@
 # Script to generate, register, and remove systemd service files
 # Description: This script allows you to generate a systemd service file
 # with all possible parameters and options, register it, and remove it.
-# Version: 1.0.2
+# Version: 1.0.3
 # Author: Torayld
 # -------------------------------------------------------------------
 
 # Script version
-SCRIPT_VERSION="1.0.2"
+SCRIPT_VERSION="1.0.3"
 
 # Default values
 description="Service managed by the script"
@@ -35,14 +35,21 @@ ambient_capabilities=""
 working_directory=""
 environment=""
 environment_file=""
+kill_mode="process"
+timeoutstopsec="10"
 syslog_identifier=""
 standard_output="journal"
 standard_error="journal"
 script_path_default="/usr/local/bin"
 script_path=""
-force_replace=false
+script_path_force=''
 remove_script=false
-base_name="myservice"  # Default base name for the service
+name="myservice"  # Default base name for the service
+
+script_path="$(cd "$(dirname "$0")" && pwd)"
+source $script_path/functions/errors_code.sh
+source $script_path/functions/checker.sh
+source $script_path/functions/copy_file.sh
 
 # Print version information
 print_version() {
@@ -54,24 +61,26 @@ display_help() {
     echo "Usage: $0 [OPTIONS]"
     echo ""
     echo "Options:"
-    echo "  -d, --description <string>     Service description."
-    echo "  -doc, --documentation <string> Documentation URL."
-    echo "  -a, --after <string>           List of services to start after this one."
-    echo "  -b, --before <string>          List of services to start before this one."
-    echo "  -w, --wants <string>           List of services this one wants."
-    echo "  -wb, --wantedby <string>       List of services that want this one."
-    echo "  -r, --requires <string>        List of services this one requires."
-    echo "  -cf, --conflicts <string>      List of services that conflict with this one."
-    echo "  -t, --type <string>            Service type (simple, forking, oneshot, etc.)."
-    echo "  -exe, --execstart <string>     Command to start the service."
-    echo "  -u, --user <string>            User to run the service as."
-    echo "  -g, --group <string>           Group to run the service as."
-    echo "  -cs, --copy-script <path>      Specifies the path of the script to copy (default $script_path_default)."
+    echo "  -d, --description=<string>     Service description."
+    echo "  -doc, --documentation=<string> Documentation URL."
+    echo "  -a, --after=<string>           List of services to start after this one."
+    echo "  -b, --before=<string>          List of services to start before this one."
+    echo "  -w, --wants=<string>           List of services this one wants."
+    echo "  -wb, --wantedby=<string>       List of services that want this one."
+    echo "  -r, --requires=<string>        List of services this one requires."
+    echo "  -cf, --conflicts=<string>      List of services that conflict with this one."
+    echo "  -t, --type=<string>            Service type (simple, forking, oneshot, etc.)."
+    echo "  -exe, --execstart=<string>     Command to start the service."
+    echo "  -u, --user=<string>            User to run the service as."
+    echo "  -g, --group=<string>           Group to run the service as."
+    echo "  -cs, --copy-script=<path>      Specifies the path of the script to copy (default $script_path_default)."
     echo "  -csf, --copy-script-force      Force overwrite the script file without confirmation."
-    echo "  -rm, --remove <service>        Remove the specified systemd service."
+    echo "  -rm, --remove=<service>        Remove the specified systemd service."
     echo "  -p, --purge                    Purge the associated script file."
-    echo "  -env, --environment <env_vars> Set environment variables (VAR=value)."
-    echo "  -n, --name <name>              Specify a custom name for the service (default: myservice)."
+    echo "  -env, --environment=<env_vars> Set environment variables ("VAR='value' VAR2='value2'")."
+    echo "  -km, --kill-mode=<mode>        Kill mode (process, control-group)."
+    echo "  -tss, --timeoutstopsec=<time>  Timeout for stopping the service."
+    echo "  -n, --name=<name>              Specify a custom name for the service (default: myservice)."
     echo "  -v, --version                  Show script version."
     echo "  -er, --error                   Display error codes and their meanings."
     echo "  -h, --help                     Display this help."
@@ -85,175 +94,18 @@ display_help() {
     echo "  $0 --name \"customservice\" --exe \"/path/to/executable\""
 }
 
-# Error codes (documenting the exit codes)
-ERROR_OK=0              # OK
-ERROR_INVALID_OPTION=10  # Invalid or unknown option provided
-ERROR_MISSING_ARGUMENT=11  # Missing argument for a required option
-ERROR_OPTION_CONFLICT=12  # Conflict between 2 arguments
-ERROR_ARGUMENT_WRONG=13  # Argument value is not valid
-ERROR_INVALID_FILE=20    # The file does not exist or is not valid
-ERROR_NOT_EXECUTABLE=21   # The file is not executable
-ERROR_FILE_COPY_FAILED=22 # The file copy operation failed
-ERROR_PERMISSION_FAILED=23 # The chmod operation failed
-ERROR_COPY_CANCELED=24 # The file copy operation canceled
-ERROR_INSTALL_FAILED=40  # The installation failed
-ERROR_UNINSTALL_FAILED=41  # The uninstallation failed
-ERROR_SERVICE_START_FAILED=60 # The service failed to start
-ERROR_SERVICE_FILE_CREATION_FAILED=61 # The systemd service file creation failed
-ERROR_SERVICE_REMOVE_FAILED=70 # Failed to remove systemd service
-ERROR_SERVICE_INVALID_DOC_TAG=71 # The service file does not contain "autoscript" in the Documentation tag
-ERROR_SCRIPT_REMOVE_FAILED=72 # Unable to remove the script file
-ERROR_SERVICE_FILE_NOT_FOUND=73 # The service file does not exist
-ERROR_SERVICE_FILE_REMOVE_FAILED=74 # Unable to remove the service file
-
-
-# Display error codes
-display_error_codes() {
-    echo "Error Codes and their Meanings:"
-    echo "---------------------------------------------------"
-    echo " $ERROR_INVALID_OPTION    : Invalid or unknown option provided."
-    echo " $ERROR_MISSING_ARGUMENT  : Missing argument for a required option."
-    echo " $ERROR_OPTION_CONFLICT   : Conflict between 2 arguments."
-    echo " $ERROR_ARGUMENT_WRONG    : Argument value is not valid."
-    echo " $ERROR_INVALID_FILE      : The file does not exist or is not valid."
-    echo " $ERROR_NOT_EXECUTABLE    : The file is not executable."
-    echo " $ERROR_FILE_COPY_FAILED  : The file copy operation failed."
-    echo " $ERROR_PERMISSION_FAILED : The chmod operation failed."
-    echo " $ERROR_COPY_CANCELED     : The file copy operation canceled."
-    echo " $ERROR_INSTALL_FAILED    : The installation failed."
-    echo " $ERROR_UNINSTALL_FAILED  : The uninstallation failed."
-    echo " $ERROR_SERVICE_START_FAILED : The service failed to start."
-    echo " $ERROR_MISSING_ARGUMENT  : Missing argument for a required option."
-    echo " $ERROR_SERVICE_FILE_CREATION_FAILED : The systemd service file creation failed."
-    echo " $ERROR_SERVICE_REMOVE_FAILED : Failed to remove systemd service."
-    echo " $ERROR_SERVICE_INVALID_DOC_TAG : The service file does not contain \"autoscript\" in the Documentation tag."
-    echo " $ERROR_SCRIPT_REMOVE_FAILED : Unable to remove the script file."
-    echo " $ERROR_SERVICE_FILE_NOT_FOUND : The service file does not exist."
-    echo " $ERROR_SERVICE_FILE_REMOVE_FAILED : Unable to remove the service file."
-    echo "---------------------------------------------------"
-}
-
 # Generate available service file name
 generate_service_filename() {
-    local service_filename="${base_name}1.service"
+    local service_filename="${name}1.service"
     local counter=1
 
     # Check if the file exists, increment the number if necessary
     while [ -f "/etc/systemd/system/$service_filename" ]; do
         counter=$((counter + 1))
-        service_filename="${base_name}${counter}.service"
+        service_filename="${name}${counter}.service"
     done
 
     echo "$service_filename"
-}
-
-# Check if files are identical
-check_files_identical() {
-    local source_file="$1"
-    local target_file="$2"
-
-    # Compare source and target files
-    if cmp -s "$source_file" "$target_file"; then
-        echo "Files are identical, no copy needed."
-        return 0  # Files are identical
-    else
-        return 1  # Files are different
-    fi
-}
-
-# Ask for file replacement confirmation
-ask_for_replacement() {
-    local source_file="$1"
-    local target_file="$2"
-    
-    # Display file sizes and dates
-    echo "Source file size: $(stat --format=%s "$source_file") bytes, modified on $(stat --format=%y "$source_file")."
-    echo "Target file size: $(stat --format=%s "$target_file") bytes, modified on $(stat --format=%y "$target_file")."
-    
-    # Prompt for confirmation to replace
-    read -p "Do you want to replace the file $target_file? (y/n): " response
-    if [[ "$response" == "y" || "$response" == "Y" ]]; then
-        return 0  # User wants to replace the file
-    else
-        return 1  # User doesn't want to replace the file
-    fi
-}
-
-# Function to verify that the directory exists, create it if not, and copy the script
-verify_and_copy_script() {
-    local script_source="$1"
-    if [ ! -f "$script_source" ]; then
-        echo "Error: File not found $script_source."
-        exit $ERROR_INVALID_FILE
-    fi
-
-    local destination_dir="$2"
-
-    if [ -n "$destination_dir" ]; then
-        # Check if the destination directory exists
-        if [ ! -d "$destination_dir" ]; then
-            echo "Directory $destination_dir does not exist. Creating it now..."
-            sudo mkdir -p "$destination_dir"
-            if [ $? -ne 0 ]; then
-                echo "Error: Failed to create directory $destination_dir."
-                exit $ERROR_INVALID_FILE
-            fi
-        fi
-        
-        # Extract the filename from the source path
-        local filename=$(basename "$script_source")
-        destination_file="$destination_dir/$filename"
-
-        # Check if the script file already exists and copy it
-        if [ -f "$destination_file" ]; then
-            check_files_identical "$script_source" "$destination_file"
-            if [ $? -eq 1 ]; then
-                if [ "$force_replace" = true ]; then
-                    echo "Force replacing the script file..."
-                    sudo cp "$script_source" "$destination_file"
-                    if [ $? -ne 0 ]; then
-                        echo "Error: Failed to copy the script to $destination_file."
-                        exit $ERROR_FILE_COPY_FAILED
-                    fi
-                else
-                    # Ask for confirmation if files are different
-                    if ask_for_replacement "$script_source" "$destination_file"; then
-                        sudo cp "$script_source" "$destination_file"
-                        if [ $? -ne 0 ]; then
-                            echo "Error: Failed to copy the script to $destination_file."
-                            exit $ERROR_FILE_COPY_FAILED
-                        fi
-                    else
-                        echo "The script file was not replaced."
-                        return 0
-                    fi
-                fi
-            fi
-        else
-            # If the script doesn't exist, just copy it
-            sudo cp "$script_source" "$destination_file"
-            if [ $? -ne 0 ]; then
-                echo "Error: Failed to copy the script to $destination_file."
-                exit $ERROR_FILE_COPY_FAILED
-            fi
-        fi
-    else
-        destination_file="$(pwd)/$(basename "$script_source")"
-        destination_file="$destination_file" | sed 's|^\.\//\+|./|'
-    fi
-
-    # If it's a shell script (.sh), set executable permissions
-    if [[ "$destination_file" == *.sh ]]; then
-        sudo chmod +x "$destination_file"
-        if [ $? -ne 0 ]; then
-            echo "Error: Failed to set executable permissions on $destination_file."
-            exit $ERROR_PERMISSION_FAILED
-        fi
-        echo "Executable permissions set on $destination_file."
-    fi
-
-    echo "Script location : $destination_file."
-    return 0
 }
 
 # Remove the systemd service and its script
@@ -305,7 +157,7 @@ remove_systemd_service() {
                     sudo rm -f "$script_path_to_remove"
                     if [ $? -ne 0 ]; then
                         echo "Error: Unable to remove the script file."
-                        exit $ERROR_SCRIPT_REMOVE_FAILED
+                        exit $ERROR_SERVICE_SCRIPT_REMOVE_FAILED
                     fi
                 else
                     echo "The script file was not removed."
@@ -323,6 +175,10 @@ remove_systemd_service() {
         exit $ERROR_SERVICE_FILE_REMOVE_FAILED
     fi
     sudo systemctl daemon-reload
+    if [ $? -ne 0 ]; then
+        echo "Error: Failed to reload systemd."
+        exit $ERROR_SERVICE_RELOAD_FAILED
+    fi
 
     echo "Systemd service $service_to_remove removed."
 }
@@ -330,7 +186,7 @@ remove_systemd_service() {
 # Argument parsing
 while [[ $# -gt 0 ]]; do
     case $1 in
-        -v|--version)
+        -v=*|--version)
             print_version
             exit $ERROR_OK
             ;;
@@ -342,86 +198,182 @@ while [[ $# -gt 0 ]]; do
             display_help
             exit $ERROR_OK
             ;;
-        -d|--description)
-            description="$2"
-            shift 2
+        -d=*|--description=*)
+            if ! check_argument "$1"; then
+                echo "Error: Missing value for option $1"
+                exit $ERROR_MISSING_ARGUMENT
+            else
+                description="${1#*=}"
+                shift
+            fi
             ;;
-        -doc|--documentation)
-            documentation=$documentation_default"$2"
-            shift 2
+        -doc=*|--documentation=*)
+            if ! check_argument "$1"; then
+                echo "Error: Missing value for option $1"
+                exit $ERROR_MISSING_ARGUMENT
+            else
+                documentation=$documentation_default"${1#*=}"
+                shift
+            fi
             ;;
-        -a|--after)
-            after="$2"
-            shift 2
+        -a=*|--after=*)
+            if ! check_argument "$1"; then
+                echo "Error: Missing value for option $1"
+                exit $ERROR_MISSING_ARGUMENT
+            else
+                after="${1#*=}"
+                shift
+            fi
             ;;
-        -b|--before)
-            before="$2"
-            shift 2
+        -b=*|--before=*)
+            if ! check_argument "$1"; then
+                echo "Error: Missing value for option $1"
+                exit $ERROR_MISSING_ARGUMENT
+            else
+                before="${1#*=}"
+                shift
+            fi
             ;;
-        -w|--wants)
-            wants="$2"
-            shift 2
+        -w=*|--wants=*)
+            if ! check_argument "$1"; then
+                echo "Error: Missing value for option $1"
+                exit $ERROR_MISSING_ARGUMENT
+            else
+                wants="${1#*=}"
+                shift
+            fi
             ;;
-        -wb|--wantedby)
-            wantedby="$2"
-            shift 2
+        -wb=*|--wantedby=*)
+            if ! check_argument "$1"; then
+                echo "Error: Missing value for option $1"
+                exit $ERROR_MISSING_ARGUMENT
+            else
+                wantedby="${1#*=}"
+                shift
+            fi
             ;;
-        -r|--requires)
-            requires="$2"
-            shift 2
+        -r=*|--requires=*)
+            if ! check_argument "$1"; then
+                echo "Error: Missing value for option $1"
+                exit $ERROR_MISSING_ARGUMENT
+            else
+                requires="${1#*=}"
+                shift
+            fi
             ;;
-        -cf|--conflicts)
-            conflicts="$2"
-            shift 2
+        -cf=*|--conflicts=*)
+            if ! check_argument "$1"; then
+                echo "Error: Missing value for option $1"
+                exit $ERROR_MISSING_ARGUMENT
+            else
+                conflicts="${1#*=}"
+                shift
+            fi
             ;;
-        -t|--type)
-            type="$2"
-            shift 2
+        -t=*|--type=*)
+            if ! check_argument "$1"; then
+                echo "Error: Missing value for option $1"
+                exit $ERROR_MISSING_ARGUMENT
+            else
+                type="${1#*=}"
+                shift
+            fi
             ;;
-        -exe|--execstart)
-            execstart="$2"
-            shift 2
+        -exe=*|--execstart=*)
+            if ! check_argument "$1"; then
+                echo "Error: Missing value for option $1"
+                exit $ERROR_MISSING_ARGUMENT
+            else
+                execstart="${1#*=}"
+                shift
+            fi
             ;;
-        -u|--user)
-            user="$2"
-            shift 2
+        -u=*|--user=*)
+            if ! check_argument "$1"; then
+                echo "Error: Missing value for option $1"
+                exit $ERROR_MISSING_ARGUMENT
+            else
+                user="${1#*=}"
+                shift
+                if ! check_user "$USER"; then
+                    exit $ERROR_ARGUMENT_WRONG
+                fi
+            fi
             ;;
-        -g|--group)
-            group="$2"
-            shift 2
+        -g=*|--group=*)
+            if ! check_argument "$1"; then
+                echo "Error: Missing value for option $1"
+                exit $ERROR_MISSING_ARGUMENT
+            else
+                group="${1#*=}"
+                shift
+            fi
             ;;
         -cs|--copy-script)
-            # Check if a value is provided for -cs
-            if [ -z "$2" ] || [[ "$2" == -* ]]; then
-                # If no value is provided or the value is another argument (starts with -), use the default path
-                script_path=$script_path_default
-                echo "No path provided for -cs. Using default path: $script_path_default"
-                shift
+            script_path="$script_path_default"
+            shift
+            ;;
+        -cs=*|--copy-script=*)
+            if ! check_argument "$1"; then
+                echo "Error: Missing value for option $1"
+                exit $ERROR_MISSING_ARGUMENT
             else
-                # If a value is provided, assign it to script_path
-                script_path="$2"
-                shift 2
+                script_path="${1#*=}"
+                shift
             fi
             ;;
         -csf|--copy-script-force)
-            force_replace=true
-            shift 1
+            script_path_force='--force'
+            shift
             ;;
-        -env|--environment)
-            environment="$2"
-            shift 2
+        -env=*|--environment=*)
+            if ! check_argument "$1"; then
+                echo "Error: Missing value for option $1"
+                exit $ERROR_MISSING_ARGUMENT
+            else
+                environment="${1#*=}"
+                shift
+            fi
             ;;
-        -n|--name)
-            base_name="$2"
-            shift 2
+        -km=*|--kill-mode=*)
+            if ! check_argument "$1"; then
+                echo "Error: Missing value for option $1"
+                exit $ERROR_MISSING_ARGUMENT
+            else
+                kill_mode="${1#*=}"
+                shift
+            fi
             ;;
-        -rm|--remove)
-            remove="$2"
-            shift 2
+        -tss=*|--timeoutstopsec=*)
+            if ! check_argument "$1" "int"; then
+                echo "Error: Missing value for option $1"
+                exit $ERROR_MISSING_ARGUMENT
+            else
+                timeoutstopsec="${1#*=}"
+                shift
+            fi
+            ;;
+        -n=*|--name=*)
+            if ! check_argument "$1"; then
+                echo "Error: Missing value for option $1"
+                exit $ERROR_MISSING_ARGUMENT
+            else
+                name="${1#*=}"
+                shift
+            fi
+            ;;
+        -rm=*|--remove=*)
+            if ! check_argument "$1"; then
+                echo "Error: Missing value for option $1"
+                exit $ERROR_MISSING_ARGUMENT
+            else
+                remove="${1#*=}"
+                shift
+            fi
             ;;
         -p|--purge)
             remove_script=true
-            shift 1
+            shift
             ;;
         *)
             echo "Unknown option: $1"
@@ -442,7 +394,27 @@ if [ -z "$execstart" ]; then
 fi
 
 # Call the function to verify and copy the script
-verify_and_copy_script "$execstart" "$script_path"
+if [ -n "$script_path" ]; then
+    echo "Copying $execstart to $script_path"
+    copy_file "$execstart" "$script_path" $script_path_force
+    ret=$?
+    if [ $ret -ne $ERROR_OK ]; then
+        exit $ret
+    fi
+    copy_dependencies "$execstart" "$script_path"
+    ret=$?
+    if [ $ret -ne $ERROR_OK ]; then
+        exit $ret
+    fi
+    execstart=$copy_file_return
+    echo "Final Script path : $execstart"
+fi
+
+if [ -n "$script_path" ]; then
+    if ! check_user_script_permission "$execstart" "$user"; then
+        exit $ERROR_PERMISSION_FAILED
+    fi
+fi
 
 # Create systemd service file
 service_file=$(generate_service_filename)
@@ -460,7 +432,7 @@ $([ -n "$conflicts" ] && echo "Conflicts=$conflicts")
 
 [Service]
 $([ -n "$type" ] && echo "Type=$type")
-$([ -n "$execstart" ] && echo "ExecStart=$destination_file")
+$([ -n "$execstart" ] && echo "ExecStart=$execstart")
 $([ -n "$user" ] && echo "User=$user")
 $([ -n "$group" ] && echo "Group=$group")
 $([ -n "$restart" ] && echo "Restart=$restart")
@@ -471,6 +443,8 @@ $([ -n "$ambient_capabilities" ] && echo "AmbientCapabilities=$ambient_capabilit
 $([ -n "$working_directory" ] && echo "WorkingDirectory=$working_directory")
 $([ -n "$environment" ] && echo "Environment=$environment")
 $([ -n "$environment_file" ] && echo "EnvironmentFile=$environment_file")
+$([ -n "$kill_mode" ] && echo "KillMode=$kill_mode")
+$([ -n "$timeoutstopsec" ] && echo "TimeoutStopSec=$timeoutstopsec")
 $([ -n "$syslog_identifier" ] && echo "SyslogIdentifier=$syslog_identifier")
 $([ -n "$standard_output" ] && echo "StandardOutput=$standard_output")
 $([ -n "$standard_error" ] && echo "StandardError=$standard_error")
@@ -487,9 +461,16 @@ echo "Systemd service file created at /etc/systemd/system/$service_file"
 
 # Reload systemd, enable, and start the service
 sudo systemctl daemon-reload
+if [ $? -ne 0 ]; then
+    echo "Error: Failed to reload systemd."
+    exit $ERROR_SERVICE_RELOAD_FAILED
+fi
 sudo systemctl enable "$service_file"
+if [ $? -ne 0 ]; then
+    echo "Error: Failed to enable the service."
+    exit $ERROR_INSTALL_FAILED
+fi
 sudo systemctl start "$service_file"
-
 if [ $? -ne 0 ]; then
     echo "Error: Failed to start the service."
     exit $ERROR_SERVICE_START_FAILED
