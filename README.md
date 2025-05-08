@@ -7,5 +7,13 @@
 <br>
 <br>
 # List of script with function to use with main script
-<br><b>copy_file.sh</b> : To handle file copy with compare and confirmation, enable chmod +x on sh file
+<br><b>copy_file.sh</b> : To handle file copy with compare and confirmation, enable chmod +x on sh file, Copy dependencies of a script to a destination directory
 <br><b>update_file.sh</b> : To handle update config file if necessary
+<br><b>checker.sh</b> : Checkers for arguments, users, and permissions
+<br><b>errors_code.sh</b> : Error Codes and their Meanings
+<br><b>network.sh</b> : Function for network operations
+<br><b>pid.sh</b> : Functions to lock execution using a PID file
+
+# List of python script
+<br><b>button.py</b> : Handler for Nespi4 buttons Change usage of power led, power button, reset button to enable wifi and display wifi mode and shutdown with systemctl
+<br><b>fan_ctrl4.py</b> : Handle PWM Fan specially Noctua NF-A4x10 5V PWM with systemctl

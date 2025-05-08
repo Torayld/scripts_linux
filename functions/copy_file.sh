@@ -1,6 +1,7 @@
 #!/bin/bash
 # -------------------------------------------------------------------
 # Copy a file with comparison and confirmation
+# Copy dependencies of a script to a destination directory
 # Version: 1.0.3
 # Author: Torayld
 # -------------------------------------------------------------------
