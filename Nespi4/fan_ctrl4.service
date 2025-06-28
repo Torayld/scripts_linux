@@ -1,5 +1,5 @@
 [Unit]
-Description=Script gestion GPIO FAN
+Description=Script de gestion GPIO Noctua NF-A4x10 5V PWM
 After=multi-user.target
 
 [Service]

@@ -6,12 +6,12 @@
 # Script to generate, register, and remove systemd service files
 # Description: This script allows you to generate a systemd service file
 # with all possible parameters and options, register it, and remove it.
-# Version: 1.0.3
+# Version: 1.0.4
 # Author: Torayld
 # -------------------------------------------------------------------
 
 # Script version
-SCRIPT_VERSION="1.0.3"
+SCRIPT_VERSION="1.0.4"
 
 # Default values
 description="Service managed by the script"
@@ -47,18 +47,19 @@ remove_script=false
 name="myservice"  # Default base name for the service
 
 script_path="$(cd "$(dirname "$0")" && pwd)"
+script_name="$(basename "$0")"
 source $script_path/functions/errors_code.sh
 source $script_path/functions/checker.sh
 source $script_path/functions/copy_file.sh
 
 # Print version information
 print_version() {
-    echo "$0 version $SCRIPT_VERSION"
+    echo "$script_name version $SCRIPT_VERSION"
     exit $ERROR_OK
 }
 
 display_help() {
-    echo "Usage: $0 [OPTIONS]"
+    echo "Usage: $script_name [OPTIONS]"
     echo ""
     echo "Options:"
     echo "  -d, --description=<string>     Service description."
@@ -86,12 +87,12 @@ display_help() {
     echo "  -h, --help                     Display this help."
     echo ""
     echo "Examples:"
-    echo "  $0 --description \"My custom service\" --exe \"/path/to/executable\" --user \"myuser\""
-    echo "  $0 --exe \"/path/to/executable\" --type forking --env \"MY_VAR=somevalue\""
-    echo "  $0 --exe \"/path/to/executable\" --documentation \"https://docs.example.com\""
-    echo "  $0 --remove-systemd \"myservice1.service\" --remove-script-file"
-    echo "  $0 --copy-script /path/to/script --csf --exe \"/path/to/executable\""
-    echo "  $0 --name \"customservice\" --exe \"/path/to/executable\""
+    echo "  $script_name --description \"My custom service\" --exe \"/path/to/executable\" --user \"myuser\""
+    echo "  $script_name --exe \"/path/to/executable\" --type forking --env \"MY_VAR=somevalue\""
+    echo "  $script_name --exe \"/path/to/executable\" --documentation \"https://docs.example.com\""
+    echo "  $script_name --remove-systemd \"myservice1.service\" --remove-script-file"
+    echo "  $script_name --copy-script /path/to/script --csf --exe \"/path/to/executable\""
+    echo "  $script_name --name \"customservice\" --exe \"/path/to/executable\""
 }
 
 # Generate available service file name
@@ -186,7 +187,7 @@ remove_systemd_service() {
 # Argument parsing
 while [[ $# -gt 0 ]]; do
     case $1 in
-        -v=*|--version)
+        -v|--version)
             print_version
             exit $ERROR_OK
             ;;
@@ -401,18 +402,33 @@ if [ -n "$script_path" ]; then
     if [ $ret -ne $ERROR_OK ]; then
         exit $ret
     fi
+    execstart=$copy_file_return
     copy_dependencies "$execstart" "$script_path"
     ret=$?
     if [ $ret -ne $ERROR_OK ]; then
         exit $ret
     fi
-    execstart=$copy_file_return
     echo "Final Script path : $execstart"
 fi
 
 if [ -n "$script_path" ]; then
     if ! check_user_script_permission "$execstart" "$user"; then
         exit $ERROR_PERMISSION_FAILED
+    fi
+fi
+
+if [ -n "$restart" ]; then
+    restart_valid_values=("no" "on-success" "on-failure" "on-abnormal" "on-watchdog" "on-abort" "always")
+    is_valid_restart=false
+    for value in "${restart_valid_values[@]}"; do
+        if [ "$restart" == "$value" ]; then
+            is_valid_restart=true
+            break
+        fi
+    done
+    if [ "$is_valid_restart" = false ]; then
+        echo "Error: Invalid value for Restart. Valid values are: ${restart_valid_values[*]}"
+        exit $ERROR_ARGUMENT_WRONG
     fi
 fi
 

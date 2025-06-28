@@ -1,5 +1,12 @@
 #!/usr/bin/python3
 
+# -------------------------------------------------------------------
+# Handler for Script de gestion GPIO Noctua NF-A4x10 5V PWM
+# Version: 1.0.0
+# Date: 2023-10-01
+# Author: Torayld
+# -------------------------------------------------------------------
+
 import RPi.GPIO as GPIO
 import time
 import signal

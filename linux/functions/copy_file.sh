@@ -2,10 +2,10 @@
 # -------------------------------------------------------------------
 # Copy a file with comparison and confirmation
 # Copy dependencies of a script to a destination directory
-# Version: 1.0.3
+# Version: 1.0.4
 # Author: Torayld
 # -------------------------------------------------------------------
-SCRIPT_VERSION="1.0.3"
+SCRIPT_VERSION="1.0.4"
 ERROR_OK=0              # OK
 ERROR_INVALID_FILE=20    # The file does not exist or is not valid
 ERROR_FILE_COPY_FAILED=22 # The file copy operation failed
@@ -32,25 +32,42 @@ copy_file() {
     return $ERROR_INVALID_FILE
   fi
 
- if [[ -f "$dest_path_file" ]]; then # file exist
+# Nettoyage défensif
+dest_path_file=$(echo "$dest_path_file" | tr -d '\r' | xargs)
+
+  if [[ -f "$dest_path_file" ]]; then # Si c'est un fichier existant
+    dest_dir=$(dirname "$dest_path_file")
+    dest_file=$(basename "$dest_path_file") 
+  elif [[ -d "$dest_path_file" ]]; then # Si c'est un répertoire existant
+    dest_dir="${dest_path_file%/}"
+    dest_file=$(basename "$source_path_file")
+    dest_path_file="${dest_dir}/${dest_file}"
+  elif [[ "${dest_path_file}" == */ ]]; then # Si le chemin n'existe pas mais se termine par un slash → probablement un dossier
+    dest_dir="${dest_path_file%/}"
+    dest_file="$source_file"
+    dest_path_file="${dest_dir}/${dest_file}"
+  elif [[ "$dest_path_file" != */* ]]; then # Si le chemin n'existe pas mais son nom ne contient pas de slash → probablement un fichier dans le dossier courant
+    dest_dir="."
+    dest_file="$dest_path_file"
+    dest_path_file="${dest_dir}/${dest_file}"
+  else # Sinon : c'est un fichier inexistant avec un chemin complexe
     dest_dir=$(dirname "$dest_path_file")
     dest_file=$(basename "$dest_path_file")
-  elif [[ "$dest_path_file" =~ ^[^/]+$ ]] && [[ ! -e "$dest_path_file" ]]; then # no / in dest_path_file and not exist consider it as file
-    dest_dir=$(dirname "$dest_path_file")
-    dest_file=$(basename "$dest_path_file")
-  else
-    #folder exist as destination or consider it as folder
-    dest_dir=$dest_path_file
-    dest_file=$source_file
-    dest_path_file="${dest_path_file%/}/$dest_file"
   fi
 
   # Check if option --parents is specified, if so, add the parent directory to the destination path
   if [[ "$options" =~ --parents ]]; then
     options="${options//--parents/}"
-    local source_dir=$(dirname "$source_path_file")
+
+    main_script="${BASH_SOURCE[${#BASH_SOURCE[@]}-1]}"
+    base_dir="$(cd "$(dirname "$main_script")" && pwd)"
+    # Récupérer le chemin relatif à base_dir
+    relative_path=${source_path_file#"$base_dir"/}
+    source_dir=$(dirname "$relative_path")
+    
+    # Ajouter ce chemin relatif à dest_dir
     dest_dir="${dest_dir%/}/${source_dir%/}"
-    dest_file=$source_file
+    dest_file=$(basename "$source_path_file")
     dest_path_file="${dest_dir%/}/$dest_file"
   fi
 
@@ -161,7 +178,7 @@ copy_dependencies() {
             file="${file#\$script_path/}"
             source_file="$script_dir/$file"
         else
-            source_file="$(real_path -m "$file")"
+            source_file="$(realpath -m "$file")"
         fi
 
         # Create dest_file path
@@ -169,7 +186,7 @@ copy_dependencies() {
 
         echo "Copying dependency: $source_file → $dest_file"
         # Copie avec conservation de la structure de dossier
-        copy_file "$source_file" "$dest_file" "--parents --force"
+        copy_file "$source_file" "$dest_dir" "--parents --force"
         ret=$?
         if [ $ret -ne $ERROR_OK ]; then
             return $ret

@@ -4,6 +4,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - 2025-06-28
+ 
+Update and correct scripts
+ 
+### Added
+Script Linux
+-rsync_backup.sh command rsync application
+-ssh-copy-id.sh  check ssh key, create ssh key, check distant home folder, check host config, send public key to distant server, check connection with public key
+-functions\pid.sh create pid file and checkit
+
+Script Windows
+-install_protocol_callto.cmd v1.0 add protocol callto:\\ to windows
+-install_protocol_rdp.com v1.5 add protocol rdp:\\ to windows and a wrapper to mstsc.exe
+-patch_rdp.ps1 v1.3 patch termserv.dll to handle multiple connection
+-robocopy_vss.cmd v1.1 use vss with robocopy
+-cleanuserfolders v1.1 clean
+
+### Changed
+Script Linux
+-systemd.sh v1.0.4 add restart value
+-rsync_backup.sh v1.0.4 check if wifi is blocked by software or hardware
+-checker.sh v1.0.2 add bool type, functions check_user_read_from_files,
+-network.sh v1.0.1 add function check_wifi_block
+ 
+### Fixed
+Script Linux
+-systemd.sh v1.0.4 correct $0 with $script_name, correct execstart value
+-usb_toolbox.sh v1.0.9 correct $0 with $script_name, correct mount with mount_point param
+-rsync_backup.sh v1.0.4 correct $0 with $script_name
+-checker.sh v1.0.2 correct function check_user_write_to_file
+-copy_file v1.0.4 correct function copy_file to determine if copying file or folder, correct function copy_dependencies
+
+### Removed
+none
+
 ## [Unreleased] - 2025-02-09
  
 Update and correct scripts

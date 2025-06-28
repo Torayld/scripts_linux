@@ -1,5 +1,5 @@
 [Unit]
-Description=Script gestion GPIO Button
+Description=Script de gestion GPIO Nespy4 Button
 After=multi-user.target
 
 [Service]

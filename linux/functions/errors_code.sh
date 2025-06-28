@@ -1,7 +1,7 @@
 #!/bin/bash
 # -------------------------------------------------------------------
 # Error Codes and their Meanings
-# Version: 1.0.0
+# Version: 1.0.2
 # Author: Torayld
 # -------------------------------------------------------------------
 
@@ -37,6 +37,12 @@ ERROR_SERVICE_SCRIPT_REMOVE_FAILED=64 # Unable to remove the script file
 ERROR_SERVICE_FILE_NOT_FOUND=65 # The service file does not exist
 ERROR_SERVICE_FILE_REMOVE_FAILED=65 # Unable to remove the service file
 
+ERROR_RSYNC_FAILED=70 # Rsync operation failed
+
+ERROR_WLAN_NOT_FOUND=80 # The WLAN interface was not found
+ERROR_WLAN_HARDWARE_DISABLED=81 # The WLAN hardware is disabled
+ERROR_WLAN_SOFT_DISABLED=82 # The WLAN software is disabled
+
 # Display error codes
 display_error_codes() {
     echo "Error Codes and their Meanings:"
@@ -68,5 +74,9 @@ display_error_codes() {
     echo " $ERROR_SERVICE_SCRIPT_REMOVE_FAILED   : Unable to remove the script file."
     echo " $ERROR_SERVICE_FILE_NOT_FOUND   : The service file does not exist."
     echo " $ERROR_SERVICE_FILE_REMOVE_FAILED   : Unable to remove the service file."
+    echo " $ERROR_RSYNC_FAILED   : Rsync operation failed."
+    echo " $ERROR_WLAN_NOT_FOUND   : The WLAN interface was not found."
+    echo " $ERROR_WLAN_HARDWARE_DISABLED   : The WLAN hardware is disabled."
+    echo " $ERROR_WLAN_SOFT_DISABLED   : The WLAN software is disabled."
     echo "---------------------------------------------------"
 }

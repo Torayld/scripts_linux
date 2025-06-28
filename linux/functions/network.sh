@@ -1,7 +1,7 @@
 #!/bin/bash
 # -------------------------------------------------------------------
 # Function for network operations
-# Version: 1.0.0
+# Version: 1.0.1
 # Author: Torayld
 # -------------------------------------------------------------------
 
@@ -219,6 +219,64 @@ get_dns_available() {
         return 1
     fi
 }
+
+# Function to check if the Wi-Fi is blocked (soft or hard)
+# The function will use rfkill to check the status of Wireless LAN devices
+# Param 1: Interface name (e.g., wlan0)
+# Return: 0 if Wi-Fi is available, 82 if soft blocked, 281 if hard blocked, 80 if WLAN interface not found
+check_wifi_block() {
+    local iface=${1:-"wlan0"}   # Default interface to wlan0 if not provided
+    local rfkill_id
+    rfkill_id=$(rfkill list | awk -v iface="$iface" '
+        BEGIN { RS=""; FS="\n" }
+        {
+            for (i=1; i<=NF; i++) {
+                if ($i ~ iface) {
+                    match($1, /^[0-9]+/);
+                    print substr($1, RSTART, RLENGTH);
+                    exit
+                }
+            }
+        }'
+    )
+
+    if [[ -z "$rfkill_id" ]]; then
+        echo "No rfkill entry found for interface: $iface"
+        return $ERROR_WLAN_NOT_FOUND
+    fi
+
+    echo "Found rfkill ID: $rfkill_id for interface: $iface"
+
+    rfkill list "$rfkill_id"
+
+    local soft_blocked hard_blocked
+    soft_blocked=$(rfkill list "$rfkill_id" | grep -i 'Soft blocked' | awk '{print $3}')
+    hard_blocked=$(rfkill list "$rfkill_id" | grep -i 'Hard blocked' | awk '{print $3}')
+
+    echo "Soft Blocked: $soft_blocked"
+    echo "Hard Blocked: $hard_blocked"
+    if [[ "$hard_blocked" == "yes" ]]; then
+        echo "Interface is hard-blocked. You may need to toggle a hardware switch (e.g., WiFi key or BIOS setting)."
+        return $ERROR_WLAN_HARDWARE_DISABLED
+    fi
+
+    if [[ "$soft_blocked" == "yes" ]]; then
+        echo "Attempting to unblock soft block..."
+        sudo rfkill unblock "$rfkill_id"
+        sleep 1
+        if rfkill list "$rfkill_id" | grep -q "Soft blocked: no"; then
+            echo "Wi-Fi successfully unblocked."
+        else
+            echo "Failed to unblock Wi-Fi."
+            return $ERROR_WLAN_SOFT_DISABLED
+        fi
+    fi
+
+    return 0  # No blocks detected, Wi-Fi is available
+}
+
+
+
 
 # Function to check if the Wi-Fi SSID is available
 # Param 1: Wi-Fi SSID

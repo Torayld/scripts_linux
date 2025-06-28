@@ -1,12 +1,12 @@
 #!/bin/bash
 # -------------------------------------------------------------------
 # USB Drive Toolbox
-# Version: 1.0.8
+# Version: 1.0.9
 # Author: Torayld
 # -------------------------------------------------------------------
 
 # Variables globales
-SCRIPT_VERSION="v1.0.8"
+SCRIPT_VERSION="v1.0.9"
 
 # Default parameters
 label=""                # Default label of the USB device
@@ -23,18 +23,19 @@ fstap_allready=false    # Flag to check if the partition is already in /etc/fsta
 
 
 script_path="$(cd "$(dirname "$0")" && pwd)"
+script_name="$(basename "$0")"
 source $script_path/functions/errors_code.sh
 source $script_path/functions/checker.sh
 
 # Print version information
 print_version() {
-    echo "$0 version $SCRIPT_VERSION"
+    echo "$script_name version $SCRIPT_VERSION"
     exit $ERROR_OK
 }
 
 # Function to display help information
 display_help() {
-    echo "Usage: $0 [options]"
+    echo "Usage: $script_name [options]"
     echo
     echo "Options:"
     echo "  -m, --mount=<path>               Specify the mount point (default: $mount_point)"
@@ -79,7 +80,7 @@ install_systemd_service() {
     fi
 
     # Calling systemd.sh to install the service
-    output=$(./systemd.sh -exe="$0" -cs -n="usb_mount" -env="PARTUUID='$partuuid' MOUNT_POINT='$mount_point'" \
+    output=$(./systemd.sh -exe="$script_name" -cs -n="usb_mount" -r="no" -env="PARTUUID='$partuuid' MOUNT_POINT='$mount_point'" \
         -d="Mounting USB Drive with Systemd" $param)
     exit_code=$?
 
@@ -249,6 +250,9 @@ umount_partition_func() {
         echo "$mount_point is not mounted."
         exit ERRORK
     fi
+
+    #udisksctl unmount -b /dev/sdb1
+    #udisksctl power-off -b /dev/sdb
 }
 
 get_label_from_partition() {
@@ -530,7 +534,7 @@ if [ "$add_fstab" = true ]; then
     add_to_fstab
 fi
 
-if [[ -n "$install_systemd" || -n "$INVOCATION_ID" ]]; then
+if [[ -n "$install_systemd" || -n "$INVOCATION_ID" || -n "$mount_point" ]]; then
     mount_partition_func
 fi
 exit $ERROR_OK

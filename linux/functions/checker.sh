@@ -1,12 +1,12 @@
 #!/bin/bash
 # -------------------------------------------------------------------
 # Checkers for arguments, users, and permissions
-# Version: 1.0.1
+# Version: 1.0.2
 # Author: Torayld
 # -------------------------------------------------------------------
 
 # Check if an argument is provided
-# Usage: check_argument "$1" [int|str|all] by default all
+# Usage: check_argument "$1" [int|str|bool|all] by default all
 # Example: check_argument "98" "int" returns 0
 # Example: check_argument "98" "str" returns 1
 # Example: check_argument "alpha" "int" returns 1
@@ -17,8 +17,8 @@ check_argument() {
     local arg_type=${2:-"all"}  # Default type is "all"
 
     # Check if the argument type is valid
-    if [[ "$arg_type" != 'int' && "$arg_type" != 'str' && "$arg_type" != 'all' ]]; then
-        echo "Error: Invalid argument type. Must be 'int', 'str' or 'all'."
+    if [[ "$arg_type" != 'int' && "$arg_type" != 'str' && "$arg_type" != 'bool' && "$arg_type" != 'all' ]]; then
+        echo "Error: Invalid argument type. Must be 'int', 'str', bool or 'all'."
         return 1
     fi
 
@@ -39,6 +39,12 @@ check_argument() {
             if ! [[ "$arg" =~ ^[a-zA-Z]+$ ]]; then
                 echo "Value must be a string"
                 return 1 
+            fi
+            ;;
+        bool)
+            if ! [[ "$arg" =~ ^(true|false)$ ]]; then
+                echo "Value must be a boolean (true/false)"
+                return 1
             fi
             ;;
     esac
@@ -104,11 +110,11 @@ check_user_script_permission() {
     fi
 }
 
-# Function to check if a specific user can write to a file
-# Usage: check_user_write_to_file "$1" "$2"
-# Example: check_user_write_to_file "user_unknown" "/path/to/file"
-# Returns 0 if the user can write to the file, 1 otherwise
-check_user_write_to_file() {
+# Function to check if a specific user can read a file
+# Usage: check_user_read_from_file "$1" "$2"
+# Example: check_user_read_from_file "user_unknown" "/path/to/file"
+# Returns 0 if the user can read the file, 1 otherwise
+check_user_read_from_file() {
     local user="$1"
     local file="$2"
 
@@ -118,13 +124,44 @@ check_user_write_to_file() {
         return 1
     fi
 
-    # Check if the file is writable by the specified user
-    if sudo -u "$user" test -w "$file"; then
-        echo "User '$user' can write to the file."
+    # Check if the file is readable by the specified user
+    if sudo -u "$user" test -r "$file"; then
+        echo "User '$user' can read the file."
         return 0
     else
-        echo "User '$user' cannot write to the file."
+        echo "User '$user' cannot read the file."
         return 1
+    fi
+}
+
+# Function to check if a specific user can write to a file
+# Usage: check_user_write_to_file "$1" "$2"
+# Example: check_user_write_to_file "user_unknown" "/path/to/file"
+# Returns 0 if the user can write to the file, 1 otherwise
+check_user_write_to_file() {
+    local user="$1"
+    local file="$2"
+
+    # Check if the file exists
+    if [[ -e "$file" ]]; then
+        # File exists, check if writable
+        if sudo -u "$user" test -w "$file"; then
+            return 0
+        else
+            echo "User '$user' cannot write to the existing file."
+            return 1
+        fi
+    else
+        # File does not exist — check if user can write in the parent directory
+        local parent_dir
+        parent_dir=$(dirname "$file")
+
+        if sudo -u "$user" test -w "$parent_dir"; then
+            return 0
+        else
+            echo "User '$user' cannot write to the parent directory — cannot create the file."
+            return 1
+        fi
     fi
 }
 
